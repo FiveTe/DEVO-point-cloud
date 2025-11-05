@@ -45,6 +45,28 @@ Event cameras offer the exciting possibility of tracking the camera's pose durin
   <img width="90%" src="assets/devo.svg">
 </p>
 
+## Point Cloud Export
+This fork adds an opt-in hook to retrieve DEVO's sparse reconstruction at the end of
+a run. Pass `return_observables=True` to the helpers in `utils/eval_utils.py`
+(`run_rgb`, `run_voxel_norm_seq`, `run_voxel`) to receive the current point cloud
+and per-patch depth estimates alongside poses and timestamps.
+
+```python
+from utils.eval_utils import run_rgb
+
+poses, tstamps, flowdata, point_cloud, depths = run_rgb(
+    imagedir=data_root,
+    cfg=config,
+    network=weights,
+    iterator=sequence_iter,
+    return_observables=True,
+)
+```
+
+`point_cloud` and `depths` are NumPy arrays ready for export to `.ply`, `.npy`, or
+any downstream format. A deeper explanation of the data flow and API surface lives
+in `docs/point_cloud_export.md`.
+
 During training, DEVO takes event voxel grids $`\{\mathbf{E}_t\}_{t=1}^N`$, inverse depths $`\{\mathbf{d}_t\}_{t=1}^N`$, and camera poses $`\{\mathbf{T}_t\}_{t=1}^N`$ of a sequence of size $N$ as input.
 DEVO estimates poses $`\{\hat{\mathbf{T}}_t\}_{t=1}^N`$ and depths $`\{\hat{\mathbf{d}}_t\}_{t=1}^N`$ of the sequence.
 Our novel patch selection network predicts a score map $\mathbf{S}_t$ to highlight optimal 2D coordinates $\mathbf{P}_t$ for optical flow and pose estimation.
@@ -166,4 +188,3 @@ We thank the authors of the following repositories for publicly releasing their 
 - [Event-based Vision for VO/VIO/SLAM in Robotics](https://github.com/arclab-hku/Event_based_VO-VIO-SLAM)
 
 This work was supported by the ERC Advanced Grant [SIMULACRON](https://cordis.europa.eu/project/id/884679).
-

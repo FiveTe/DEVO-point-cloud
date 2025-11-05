@@ -183,8 +183,13 @@ class DEVO:
         t0, dP = self.delta[t]
         return dP * self.get_pose(t0)
 
-    def terminate(self):
-        """ interpolate missing poses """
+    def terminate(self, return_observables=False):
+        """Interpolate missing poses and optionally export sparse map data.
+
+        Args:
+            return_observables (bool): If True, also return the current sparse
+                point cloud and per-patch depth values as NumPy arrays.
+        """
         print("keyframes", self.n)
         self.traj = {}
         for i in range(self.n):
@@ -204,6 +209,26 @@ class DEVO:
 
         if self.viewer is not None:
             self.viewer.join()
+
+        if return_observables:
+            if self.m > 0:
+                pc = pops.point_cloud(
+                    SE3(self.poses), self.patches[:, :self.m], self.intrinsics, self.ix[:self.m]
+                )
+                pc = pc[..., 1, 1, :3] / pc[..., 1, 1, 3:]
+                point_cloud = pc.reshape(-1, 3).detach().cpu().numpy()
+                depths = (
+                    self.patches[:, :self.m, 2, self.P // 2, self.P // 2]
+                    .reshape(-1)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+            else:
+                point_cloud = np.zeros((0, 3), dtype=np.float32)
+                depths = np.zeros((0,), dtype=np.float32)
+
+            return poses, tstamps, point_cloud, depths
 
         return poses, tstamps
     

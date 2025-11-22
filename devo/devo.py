@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+import os
+from plyfile import PlyData, PlyElement
 import torch.nn.functional as F
 
 from . import fastba
@@ -19,7 +21,7 @@ from utils.viz_utils import visualize_voxel
 
 
 class DEVO:
-    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32):
+    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32, save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds"):
         self.cfg = cfg
         self.evs = evs
 
@@ -33,6 +35,10 @@ class DEVO:
         self.enable_timing = False # TODO timing in param
 
         self.viz_flow = viz_flow
+        self.save_per_frame_cloud = save_per_frame_cloud
+        self.save_per_frame_cloud_path = save_per_frame_cloud_path
+        if self.save_per_frame_cloud:
+            os.makedirs(self.save_per_frame_cloud_path, exist_ok=True)
         
         self.n = 0      # active keyframes/frames (every frames == keyframe)
         self.m = 0      # number active patches
@@ -368,6 +374,23 @@ class DEVO:
             points = (points[...,1,1,:3] / points[...,1,1,3:]).reshape(-1, 3)
             self.points_[:len(points)] = points[:]
 
+    def save_cloud(self, frame_id):
+        if self.m > 0:
+            pc = pops.point_cloud(
+                SE3(self.poses), self.patches[:, :self.m], self.intrinsics, self.ix[:self.m]
+            )
+            pc = pc[..., 1, 1, :3] / pc[..., 1, 1, 3:]
+            point_cloud = pc.reshape(-1, 3).detach().cpu().numpy()
+            
+            # Filter out invalid points (e.g., extremely large values or NaNs)
+            valid_mask = np.isfinite(point_cloud).all(axis=1)
+            point_cloud = point_cloud[valid_mask]
+
+            if point_cloud.shape[0] > 0:
+                vertex = np.array([tuple(p) for p in point_cloud], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+                el = PlyElement.describe(vertex, 'vertex')
+                PlyData([el]).write(os.path.join(self.save_per_frame_cloud_path, f"cloud_{frame_id:05d}.ply"))
+
     def flow_viz_step(self):
         # [DEBUG]
         # dij = (self.ii - self.jj).abs()
@@ -575,6 +598,9 @@ class DEVO:
         elif self.is_initialized:
             self.update()
             self.keyframe()
+
+        if self.save_per_frame_cloud and self.is_initialized:
+            self.save_cloud(self.counter)
 
         if self.viz_flow:
             self.flow_viz_step()

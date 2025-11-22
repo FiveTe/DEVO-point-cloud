@@ -99,6 +99,8 @@ if __name__ == '__main__':
     parser.add_argument('--dim_fnet', type=int, default=128, help='channel dimension of last layer fnet')
     parser.add_argument('--dim', type=int, default=32, help='channel dimension of first layer in extractor')
     parser.add_argument('--rpg_eval', action="store_true", help='advanced eval')
+    parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+    parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -112,7 +114,8 @@ if __name__ == '__main__':
     kwargs = {"scale": args.scale, "dim_inet": args.dim_inet, "dim_fnet": args.dim_fnet, "dim": args.dim}
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                         plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
-                        stride=args.stride, **kwargs, viz_flow=args.viz_flow, rpg_eval=args.rpg_eval, expname=args.expname)
+                        stride=args.stride, **kwargs, viz_flow=args.viz_flow, rpg_eval=args.rpg_eval, expname=args.expname,
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path)
     
     print("val_results= \n")
     for k in val_results:

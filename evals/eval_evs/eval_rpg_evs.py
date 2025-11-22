@@ -9,7 +9,7 @@ from utils.viz_utils import viz_flow_inference
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
-             stride=1, trials=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False):
+             stride=1, trials=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False, **kwargs):
     dataset_name = "rpg_evs"
     assert side == "left" or side == "right"
 
@@ -44,7 +44,7 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
             # run the slam system
             traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
                                           iterator=rpg_evs_iterator(datapath_val, side=side, stride=stride, timing=timing, dT_ms=None, H=H, W=W), # optionally pass DELTA_MS
-                                          timing=timing, H=H, W=W, viz_flow=viz_flow)
+                                          timing=timing, H=H, W=W, viz_flow=viz_flow, **kwargs)
 
             # load traj
             tss_traj_us, traj_hf = load_gt_us(traj_hf_path)
@@ -87,6 +87,8 @@ if __name__ == '__main__':
     parser.add_argument('--side', type=str, default="left")
     parser.add_argument('--viz_flow', action="store_true")
     parser.add_argument('--expname', type=str, default="")
+    parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+    parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -102,7 +104,8 @@ if __name__ == '__main__':
     # args.viz_flow = True
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                        plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
-                        side=args.side, stride=args.stride, viz_flow=args.viz_flow)
+                        side=args.side, stride=args.stride, viz_flow=args.viz_flow, 
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path)
     
     print("val_results= \n")
     for k in val_results:

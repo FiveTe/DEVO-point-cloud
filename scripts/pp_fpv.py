@@ -52,8 +52,8 @@ def process_seq_fpv(indirs):
         evs = np.asarray(np.loadtxt(evs_file[0], delimiter=" ")) # (N, 4) with [ts_sec, x, y, p]
         evs[:, 0] = evs[:, 0] * 1e6 
 
-        imgdir = os.path.join(indir, "img")
-        imgdirout = os.path.join(indir, f"images_undistorted")
+        imgdir = "img"
+        imgdirout = os.path.join(indir, "images_undistorted")
         os.makedirs(imgdirout, exist_ok=True)
 
         img_list = sorted(os.listdir(os.path.join(indir, imgdir)))
@@ -108,7 +108,7 @@ def process_seq_fpv(indirs):
         f.close()        
 
         # 1) undistorting images
-        img_list_undist = sorted(os.listdir(os.path.join(indir, imgdirout)))
+        img_list_undist = sorted(os.listdir(imgdirout))
         if len(img_list_undist) == len(img_list):
             print("Images already undistorted. Skipping")
         else:

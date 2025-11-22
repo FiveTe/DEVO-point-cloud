@@ -35,8 +35,8 @@ from evo.core.trajectory import PoseTrajectory3D
 # plt.show()
 
 @torch.no_grad()
-def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, return_observables=False): 
-    slam = DEVO(cfg, network, ht=H, wd=W, viz=viz, viz_flow=viz_flow)
+def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, return_observables=False, **kwargs): 
+    slam = DEVO(cfg, network, ht=H, wd=W, viz=viz, viz_flow=viz_flow, **kwargs)
     
     for i, (image, intrinsics, t) in enumerate(iterator):
         if timing and i == 0:

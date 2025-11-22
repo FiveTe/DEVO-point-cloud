@@ -11,6 +11,8 @@ parser.add_argument("--weights", default="DEVO.pth")
 parser.add_argument("--out", default="point_cloud.npy")
 parser.add_argument("--viz", action="store_true", help="Enable live DPViewer visualization")
 parser.add_argument("--viz-flow", action="store_true", help="Enable flow computation/output")
+parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
 args = parser.parse_args()
 
 cfg.merge_from_file(args.config)
@@ -25,6 +27,8 @@ poses, tstamps, flow, point_cloud, depths = run_voxel(
     viz=args.viz,
     viz_flow=args.viz_flow,
     return_observables=True,
+    save_per_frame_cloud=args.save_per_frame_cloud,
+    save_per_frame_cloud_path=args.save_per_frame_cloud_path,
 )
 
 base, ext = os.path.splitext(args.out)
@@ -41,3 +45,4 @@ np.save(base + "_tstamps" + ext, tstamps)
 
 if flow is not None:
     np.save(base + "_flow" + ext, flow, allow_pickle=True)
+

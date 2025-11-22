@@ -53,7 +53,7 @@ def process_seq_fpv(indirs):
         evs[:, 0] = evs[:, 0] * 1e6 
 
         imgdir = "img"
-        imgdirout = os.path.join(indir, "images_undistorted")
+        imgdirout = os.path.join(indir, f"images_undistorted")
         os.makedirs(imgdirout, exist_ok=True)
 
         img_list = sorted(os.listdir(os.path.join(indir, imgdir)))
@@ -108,7 +108,7 @@ def process_seq_fpv(indirs):
         f.close()        
 
         # 1) undistorting images
-        img_list_undist = sorted(os.listdir(imgdirout))
+        img_list_undist = sorted(os.listdir(os.path.join(indir, imgdirout)))
         if len(img_list_undist) == len(img_list):
             print("Images already undistorted. Skipping")
         else:
@@ -193,3 +193,4 @@ if __name__ == "__main__":
         
     for p in processes:
         p.join()
+

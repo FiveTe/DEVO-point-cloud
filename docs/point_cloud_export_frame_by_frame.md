@@ -1,6 +1,6 @@
 # Frame-by-Frame Point Cloud Export
 
-This feature allows you to export the sparse point cloud reconstruction for every frame processed by DEVO. The point clouds are saved as `.ply` files.
+This feature allows you to export the sparse point cloud reconstruction for every frame processed by DEVO. The point clouds are saved as `.ply` files and, optionally, as a compact `.npz` bundle that also stores timestamps, poses, depths, and intrinsics for downstream TSDF fusion.
 
 ## Usage
 
@@ -42,12 +42,36 @@ python scripts/export_pointcloud.py \
     --weights DEVO.pth \
     --out results/fpv_final.npy \
     --save_per_frame_cloud \
-    --save_per_frame_cloud_path results/fpv_clouds
+    --save_per_frame_cloud_path results/fpv_clouds \
+    --export_frame_data \
+    --frame_data_out results/fpv_frames.npz
 ```
 
 ## Output Format
 
-The exported files are standard binary PLY files containing vertex positions (x, y, z). You can visualize them using tools like MeshLab, CloudCompare, or Open3D.
+The exported `.ply` files contain vertex positions `(x, y, z)` per frame. `export_pointcloud.py` can also drop a `results/..._frames.npz` bundle with the following arrays:
+
+- `frame_ids` – zero-based frame indices recorded right after initialization.
+- `timestamps` – the sequence timestamp per frame (float, whatever iterator emits).
+- `poses` – rigid-body poses in `(tx, ty, tz, qx, qy, qz, qw)` format.
+- `intrinsics` – `(fx, fy, cx, cy)` per frame (already scaled for DEVO’s resolution).
+- `counts` – number of valid sparse points contributed by each frame.
+- `offsets` – starting index of each frame in the concatenated point/depth arrays.
+- `points` – concatenated `(x, y, z)` samples in world coordinates.
+- `depths` – per-point depth value that was used during bundle adjustment.
+
+You can reconstruct the point cloud for frame `i` via
+
+```python
+data = np.load("results/fpv_frames.npz")
+start = data["offsets"][i]
+count = data["counts"][i]
+pts_i = data["points"][start:start+count]
+deps_i = data["depths"][start:start+count]
+pose_i = data["poses"][i]
+```
+
+`counts` can be zero for frames where no reliable patches were promoted; skip those gracefully.
 
 ## Supported Scripts
 

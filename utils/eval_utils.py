@@ -35,8 +35,9 @@ from evo.core.trajectory import PoseTrajectory3D
 # plt.show()
 
 @torch.no_grad()
-def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, return_observables=False, **kwargs): 
-    slam = DEVO(cfg, network, ht=H, wd=W, viz=viz, viz_flow=viz_flow, **kwargs)
+def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, return_observables=False, return_frame_observables=False, **kwargs): 
+    record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
+    slam = DEVO(cfg, network, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
     
     for i, (image, intrinsics, t) in enumerate(iterator):
         if timing and i == 0:
@@ -53,10 +54,17 @@ def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=48
     for _ in range(12):
         slam.update()
 
-    if return_observables:
+    if return_observables and return_frame_observables:
+        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+    elif return_observables:
         poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
+        frame_data = None
+    elif return_frame_observables:
+        poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
+        point_cloud, depths = None, None
     else:
         poses, tstamps = slam.terminate()
+        point_cloud = depths = frame_data = None
 
     if timing:
         t1.record()
@@ -65,14 +73,19 @@ def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=48
         print(f"{imagedir}\nDPVO Network {i+1} frames in {dt} sec, e.g. {(i+1)/dt} FPS")
     
     flowdata = slam.flow_data if viz_flow else None
+    if return_observables and return_frame_observables:
+        return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
         return poses, tstamps, flowdata, point_cloud, depths
+    if return_frame_observables:
+        return poses, tstamps, flowdata, frame_data
     return poses, tstamps, flowdata
 
 
 @torch.no_grad()
-def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, N_norm=15, return_observables=False, **kwargs): 
-    slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, **kwargs)
+def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, N_norm=15, return_observables=False, return_frame_observables=False, **kwargs): 
+    record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
+    slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
     
     voxels = []
     tss = []
@@ -105,20 +118,32 @@ def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=
     for _ in range(12):
         slam.update()
 
-    if return_observables:
+    if return_observables and return_frame_observables:
+        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+    elif return_observables:
         poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
+        frame_data = None
+    elif return_frame_observables:
+        poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
+        point_cloud, depths = None, None
     else:
         poses, tstamps = slam.terminate()
+        point_cloud = depths = frame_data = None
 
     flowdata = slam.flow_data if viz_flow else None
+    if return_observables and return_frame_observables:
+        return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
         return poses, tstamps, flowdata, point_cloud, depths
+    if return_frame_observables:
+        return poses, tstamps, flowdata, frame_data
     return poses, tstamps, flowdata
 
 
 @torch.no_grad()
-def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, return_observables=False, **kwargs): 
-    slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, **kwargs)
+def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, return_observables=False, return_frame_observables=False, **kwargs): 
+    record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
+    slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
     
     for i, (voxel, intrinsics, t) in enumerate(iterator):
         if timing and i == 0:
@@ -137,10 +162,17 @@ def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=
     for _ in range(12):
         slam.update()
 
-    if return_observables:
+    if return_observables and return_frame_observables:
+        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+    elif return_observables:
         poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
+        frame_data = None
+    elif return_frame_observables:
+        poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
+        point_cloud, depths = None, None
     else:
         poses, tstamps = slam.terminate()
+        point_cloud = depths = frame_data = None
 
     if timing:
         t1.record()
@@ -149,8 +181,12 @@ def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=
         print(f"{voxeldir}\nDEVO Network {i+1} frames in {dt} sec, e.g. {(i+1)/dt} FPS")
     
     flowdata = slam.flow_data if viz_flow else None
+    if return_observables and return_frame_observables:
+        return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
         return poses, tstamps, flowdata, point_cloud, depths
+    if return_frame_observables:
+        return poses, tstamps, flowdata, frame_data
     return poses, tstamps, flowdata
 
 

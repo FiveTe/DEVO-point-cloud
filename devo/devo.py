@@ -21,7 +21,7 @@ from utils.viz_utils import visualize_voxel
 
 
 class DEVO:
-    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32, save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds"):
+    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32, save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", record_frame_observables=False):
         self.cfg = cfg
         self.evs = evs
 
@@ -39,6 +39,9 @@ class DEVO:
         self.save_per_frame_cloud_path = save_per_frame_cloud_path
         if self.save_per_frame_cloud:
             os.makedirs(self.save_per_frame_cloud_path, exist_ok=True)
+        
+        self.record_frame_observables = record_frame_observables
+        self.frame_observables = []
         
         self.n = 0      # active keyframes/frames (every frames == keyframe)
         self.m = 0      # number active patches
@@ -189,12 +192,54 @@ class DEVO:
         t0, dP = self.delta[t]
         return dP * self.get_pose(t0)
 
-    def terminate(self, return_observables=False):
+    def _extract_sparse_map(self, patch_slice=None):
+        """Return XYZ points and depths for the current sparse map or a slice."""
+        if self.m == 0:
+            return (
+                np.zeros((0, 3), dtype=np.float32),
+                np.zeros((0,), dtype=np.float32),
+            )
+
+        start = 0
+        end = self.m
+        if patch_slice is not None:
+            start = max(int(patch_slice[0]), 0)
+            end = min(int(patch_slice[1]), self.m)
+
+        if end <= start:
+            return (
+                np.zeros((0, 3), dtype=np.float32),
+                np.zeros((0,), dtype=np.float32),
+            )
+
+        patches = self.patches[:, start:end]
+        ix = self.ix[start:end]
+
+        pc = pops.point_cloud(SE3(self.poses), patches, self.intrinsics, ix)
+        pc = pc[..., 1, 1, :3] / pc[..., 1, 1, 3:]
+        point_cloud = pc.reshape(-1, 3).detach().cpu().numpy()
+        depths = (
+            self.patches[:, start:end, 2, self.P // 2, self.P // 2]
+            .reshape(-1)
+            .detach()
+            .cpu()
+            .numpy()
+        )
+
+        valid_mask = np.isfinite(point_cloud).all(axis=1)
+        point_cloud = point_cloud[valid_mask]
+        depths = depths[valid_mask]
+
+        return point_cloud, depths
+
+    def terminate(self, return_observables=False, return_frame_observables=False):
         """Interpolate missing poses and optionally export sparse map data.
 
         Args:
             return_observables (bool): If True, also return the current sparse
                 point cloud and per-patch depth values as NumPy arrays.
+            return_frame_observables (bool): If True, also return per-frame
+                sparse point clouds with timestamps, poses, and intrinsics.
         """
         print("keyframes", self.n)
         self.traj = {}
@@ -216,25 +261,29 @@ class DEVO:
         if self.viewer is not None:
             self.viewer.join()
 
-        if return_observables:
-            if self.m > 0:
-                pc = pops.point_cloud(
-                    SE3(self.poses), self.patches[:, :self.m], self.intrinsics, self.ix[:self.m]
+        frame_data = None
+        if return_frame_observables:
+            frame_data = []
+            for entry in self.frame_observables:
+                frame_data.append(
+                    {
+                        "frame_id": entry["frame_id"],
+                        "timestamp": entry["timestamp"],
+                        "pose": entry["pose"].copy(),
+                        "intrinsics": entry["intrinsics"].copy(),
+                        "points": entry["points"].copy(),
+                        "depths": entry["depths"].copy(),
+                    }
                 )
-                pc = pc[..., 1, 1, :3] / pc[..., 1, 1, 3:]
-                point_cloud = pc.reshape(-1, 3).detach().cpu().numpy()
-                depths = (
-                    self.patches[:, :self.m, 2, self.P // 2, self.P // 2]
-                    .reshape(-1)
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
-            else:
-                point_cloud = np.zeros((0, 3), dtype=np.float32)
-                depths = np.zeros((0,), dtype=np.float32)
 
+        if return_observables:
+            point_cloud, depths = self._extract_sparse_map()
+            if return_frame_observables:
+                return poses, tstamps, point_cloud, depths, frame_data
             return poses, tstamps, point_cloud, depths
+
+        if return_frame_observables:
+            return poses, tstamps, frame_data
 
         return poses, tstamps
     
@@ -375,21 +424,35 @@ class DEVO:
             self.points_[:len(points)] = points[:]
 
     def save_cloud(self, frame_id):
-        if self.m > 0:
-            pc = pops.point_cloud(
-                SE3(self.poses), self.patches[:, :self.m], self.intrinsics, self.ix[:self.m]
-            )
-            pc = pc[..., 1, 1, :3] / pc[..., 1, 1, 3:]
-            point_cloud = pc.reshape(-1, 3).detach().cpu().numpy()
-            
-            # Filter out invalid points (e.g., extremely large values or NaNs)
-            valid_mask = np.isfinite(point_cloud).all(axis=1)
-            point_cloud = point_cloud[valid_mask]
+        point_cloud, _ = self._extract_sparse_map()
+        if point_cloud.shape[0] == 0:
+            return
 
-            if point_cloud.shape[0] > 0:
-                vertex = np.array([tuple(p) for p in point_cloud], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
-                el = PlyElement.describe(vertex, 'vertex')
-                PlyData([el]).write(os.path.join(self.save_per_frame_cloud_path, f"cloud_{frame_id:05d}.ply"))
+        vertex = np.array([tuple(p) for p in point_cloud], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+        el = PlyElement.describe(vertex, 'vertex')
+        PlyData([el]).write(os.path.join(self.save_per_frame_cloud_path, f"cloud_{frame_id:05d}.ply"))
+
+    def _record_frame_observables(self, frame_id):
+        if self.m < self.M or len(self.tlist) == 0:
+            return
+
+        start = max(self.m - self.M, 0)
+        point_cloud, depths = self._extract_sparse_map((start, self.m))
+
+        frame_pose = self.poses_[self.n - 1].detach().cpu().numpy()
+        intrinsics = self.intrinsics_[self.n - 1].detach().cpu().numpy()
+        timestamp = float(self.tlist[-1])
+
+        self.frame_observables.append(
+            {
+                "frame_id": int(frame_id),
+                "timestamp": timestamp,
+                "pose": frame_pose,
+                "intrinsics": intrinsics,
+                "points": point_cloud,
+                "depths": depths,
+            }
+        )
 
     def flow_viz_step(self):
         # [DEBUG]
@@ -601,6 +664,9 @@ class DEVO:
 
         if self.save_per_frame_cloud and self.is_initialized:
             self.save_cloud(self.counter)
+
+        if self.record_frame_observables and self.is_initialized:
+            self._record_frame_observables(self.counter - 1)
 
         if self.viz_flow:
             self.flow_viz_step()

@@ -20,4 +20,4 @@ MIXED_PRECISION: True
 PATCH_SELECTOR: 'random'
 # Eval mode of patch selector (random, topk, multi)
 SCORER_EVAL_MODE: 'random'
-SCORER_EVAL_USE_GRID: False
+SCORER_EVAL_USE_GRID: True

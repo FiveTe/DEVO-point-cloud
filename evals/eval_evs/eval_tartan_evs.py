@@ -8,14 +8,15 @@ from devo.config import cfg
 
 from utils.eval_utils import run_voxel, assert_eval_config
 from utils.load_utils import voxel_iterator_parallel, voxel_iterator
-from utils.eval_utils import log_results, log_results_loss, write_raw_results, compute_results, compute_median_results
+from utils.eval_utils import log_results, write_raw_results, compute_median_results
 from utils.transform_utils import transform_rescale_poses
 from utils.viz_utils import viz_flow_inference
+from utils.pcd_utils import save_point_clouds_to_ply
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
              trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, viz_flow=False, scale=1.0,
-             rpg_eval=True, expname="", **kwargs):
+             rpg_eval=True, expname="", save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", voxel_size=0.05, **kwargs):
     dataset_name = "tartanair_evs"
 
     if config is None:
@@ -46,7 +47,8 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
                 kwargs.update({"scale": scale, "H": nH, "W": nW})
             traj_est, tstamps, flowdata = run_voxel(scene_path, config, net, viz=viz,
                                                  iterator=voxel_iterator(scene_path, timing=timing, stride=stride, scale=scale),
-                                                 timing=timing, **kwargs, viz_flow=viz_flow)
+                                                 timing=timing, **kwargs, viz_flow=viz_flow,
+                                                 save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path, voxel_size=voxel_size)
 
             PERM = [1, 2, 0, 4, 5, 3, 6] # ned -> xyz
             # events between two adjacent frames t-1 and t are accumulated in event voxel t -> ignore first pose (t=0)
@@ -101,6 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--rpg_eval', action="store_true", help='advanced eval')
     parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
     parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
+    parser.add_argument('--voxel_size', type=float, default=0.05, help="Voxel size for point cloud downsampling")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -115,7 +118,7 @@ if __name__ == '__main__':
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                         plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
                         stride=args.stride, **kwargs, viz_flow=args.viz_flow, rpg_eval=args.rpg_eval, expname=args.expname,
-                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path)
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path, voxel_size=args.voxel_size)
     
     print("val_results= \n")
     for k in val_results:

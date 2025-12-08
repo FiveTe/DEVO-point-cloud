@@ -1,12 +1,15 @@
 import os
 from pathlib import Path
 import torch
+import matplotlib
+matplotlib.rcParams['text.usetex'] = False
 from devo.config import cfg
 
 from utils.load_utils import load_gt_us, fpv_evs_iterator
 from utils.eval_utils import assert_eval_config, run_voxel
 from utils.eval_utils import log_results, write_raw_results, compute_median_results
 from utils.viz_utils import viz_flow_inference
+from utils.pcd_utils import save_point_clouds_to_ply
 
 from devo.plot_utils import save_trajectory_tum_format
 
@@ -14,7 +17,8 @@ H, W = 260, 346
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None, 
-             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, viz_flow=False):
+             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, viz_flow=False,
+             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", voxel_size=0.05):
     dataset_name = "fpv_evs"
 
     if config is None:
@@ -57,7 +61,8 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
                 # run the slam system
                 traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
                                             iterator=fpv_evs_iterator(datapath_val, stride=stride, timing=timing, H=H, W=W, tss_gt_us=tss_traj_us),
-                                            timing=timing, H=H, W=W, viz_flow=viz_flow)
+                                            timing=timing, H=H, W=W, viz_flow=viz_flow,
+                                            save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path, voxel_size=voxel_size)
 
 
                 # do evaluation 
@@ -88,7 +93,7 @@ if __name__ == '__main__':
     parser.add_argument('--datapath', default='', help='path to dataset directory')
     parser.add_argument('--weights', default="DEVO.pth")
     parser.add_argument('--val_split', type=str, default="splits/fpv/fpv_val.txt")
-    parser.add_argument('--trials', type=int, default=5)
+    parser.add_argument('--trials', type=int, default=1)
     parser.add_argument('--plot', action="store_true")
     parser.add_argument('--save_trajectory', action="store_true")
     parser.add_argument('--return_figs', action="store_true")
@@ -98,6 +103,9 @@ if __name__ == '__main__':
     parser.add_argument('--side', type=str, default="left")
     parser.add_argument('--viz_flow', action="store_true")
     parser.add_argument('--expname', type=str, default="")
+    parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+    parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
+    parser.add_argument('--voxel_size', type=float, default=0.05, help="Voxel size for point cloud downsampling")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -112,7 +120,8 @@ if __name__ == '__main__':
     args.plot = True
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                        plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
-                        stride=args.stride, viz_flow=args.viz_flow)
+                        stride=args.stride, viz_flow=args.viz_flow,
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path, voxel_size=args.voxel_size)
     
     print("val_results= \n")
     for k in val_results:

@@ -6,13 +6,15 @@ from utils.load_utils import load_gt_us, vector_evs_iterator
 from utils.eval_utils import assert_eval_config, run_voxel
 from utils.eval_utils import log_results, write_raw_results, compute_median_results
 from utils.viz_utils import viz_flow_inference
+from utils.pcd_utils import save_point_clouds_to_ply
 
 H, W = 480, 640
 
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None, 
-             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False, dT_ms=None):
+             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False, dT_ms=None,
+             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", start_us=None, stop_us=None):
     dataset_name = "vector_evs"
     assert side == "left" or side == "right"
 
@@ -35,8 +37,10 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
         for trial in range(trials):
             # run the slam system
             traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
-                                          iterator=vector_evs_iterator(datapath_val, side, stride=stride, dT_ms=dT_ms, timing=timing, H=H, W=W),
-                                          timing=timing, H=H, W=W, viz_flow=viz_flow)
+                                          iterator=vector_evs_iterator(datapath_val, side, stride=stride, dT_ms=dT_ms, timing=timing, H=H, W=W,
+                                                                       t_start_us=start_us, t_stop_us=stop_us),
+                                          timing=timing, H=H, W=W, viz_flow=viz_flow,
+                                          save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path)
 
             # load  traj
             tss_traj_us, traj_hf = load_gt_us(os.path.join(datapath_val, f"poses_evs_{side}.txt"))
@@ -79,6 +83,10 @@ if __name__ == '__main__':
     parser.add_argument('--side', type=str, default="left")
     parser.add_argument('--viz_flow', action="store_true")
     parser.add_argument('--expname', type=str, default="")
+    parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+    parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
+    parser.add_argument('--start_us', type=float, default=None, help="Restrict evaluation to timestamps >= start_us (microseconds)")
+    parser.add_argument('--stop_us', type=float, default=None, help="Restrict evaluation to timestamps <= stop_us (microseconds)")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -92,8 +100,10 @@ if __name__ == '__main__':
     args.save_trajectory = True
     args.plot = True
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
-                       plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
-                        stride=args.stride, side=args.side, viz_flow=args.viz_flow)
+                        plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
+                        stride=args.stride, side=args.side, viz_flow=args.viz_flow,
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path,
+                        start_us=args.start_us, stop_us=args.stop_us)
     
     print("val_results= \n")
     for k in val_results:

@@ -6,12 +6,14 @@ from utils.load_utils import load_eds_traj, eds_evs_iterator
 from utils.eval_utils import assert_eval_config, run_voxel
 from utils.eval_utils import log_results, write_raw_results, compute_median_results
 from utils.viz_utils import viz_flow_inference
+from utils.pcd_utils import save_point_clouds_to_ply
 
 H, W = 480, 640
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None, 
-             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, calib1=False, timing=False, viz_flow=False):
+             trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, calib1=False, timing=False, viz_flow=False,
+             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds"):
     dataset_name = "eds_evs"
 
     if config is None:
@@ -35,7 +37,8 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
             # run the slam system
             traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
                                           iterator=eds_evs_iterator(datapath_val, calib1=calib1, stride=stride, timing=timing, H=H, W=W),
-                                          timing=timing, H=H, W=W, viz_flow=viz_flow)
+                                          timing=timing, H=H, W=W, viz_flow=viz_flow,
+                                          save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path)
 
             # load traj
             tss_traj_us, traj_hf = load_eds_traj(traj_hf_path)
@@ -78,6 +81,8 @@ if __name__ == '__main__':
     parser.add_argument('--stride', type=int, default=1)
     parser.add_argument('--viz_flow', action="store_true")
     parser.add_argument('--expname', type=str, default="")
+    parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
+    parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -90,7 +95,8 @@ if __name__ == '__main__':
 
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                        plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, calib1=args.calib1, \
-                        timing=args.timing, stride=args.stride, viz_flow=args.viz_flow)
+                        timing=args.timing, stride=args.stride, viz_flow=args.viz_flow,
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path)
     
     print("val_results= \n")
     for k in val_results:

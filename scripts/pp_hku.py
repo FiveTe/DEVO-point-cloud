@@ -7,10 +7,10 @@ import glob
 import multiprocessing
 
 import h5py
+from utils import rosbag_compat as rosbag
 from utils.load_utils import compute_rmap_vector
 from utils.event_utils import write_evs_arr_to_h5
 from utils.viz_utils import render
-import rosbag
 from utils.bag_utils import read_H_W_from_bag, read_tss_us_from_rosbag, read_images_from_rosbag, read_evs_from_rosbag, read_calib_from_bag, read_t0us_evs_from_rosbag, read_poses_from_rosbag
 
 H, W = 260, 346

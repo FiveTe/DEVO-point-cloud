@@ -88,7 +88,7 @@ def process_seq_vector(indirs, side="left"):
             f.write(f"{q[0]} {q[1]} {q[2]} {q[3]} {q[4]} {q[5]} {q[6]} {q[7]}\n")
         f.close()
 
-        continue
+
 
         f = open(os.path.join(indir, f"tss_imgs_us_{side}.txt"), 'w')
         for tss in tss_imgs:

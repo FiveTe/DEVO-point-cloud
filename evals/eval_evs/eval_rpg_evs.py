@@ -6,10 +6,12 @@ from utils.load_utils import load_gt_us, rpg_evs_iterator
 from utils.eval_utils import assert_eval_config, run_voxel
 from utils.eval_utils import log_results, write_raw_results, compute_median_results
 from utils.viz_utils import viz_flow_inference
+from utils.pcd_utils import save_point_clouds_to_ply
 
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
-             stride=1, trials=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False, **kwargs):
+             stride=1, trials=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False,
+             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", voxel_size=0.05, **kwargs):
     dataset_name = "rpg_evs"
     assert side == "left" or side == "right"
 
@@ -22,6 +24,7 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
 
     results_dict_scene, figures = {}, {}
     all_results = []
+    outfolder = None
     for i, scene in enumerate(scenes):
         if "simulation_3planes" in scene:
             H, W = 260, 346
@@ -32,7 +35,7 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
 
         traj_hf_path = os.path.join(datapath, scene, f"gt_stamped_{side}.txt")
         if not os.path.exists(traj_hf_path):
-            print(f"scene {scene} has no GT, skipping")
+            print(f"scene {scene} has no GT at {traj_hf_path}, skipping")
             continue
 
         print(f"Eval on {scene}")
@@ -44,7 +47,8 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
             # run the slam system
             traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
                                           iterator=rpg_evs_iterator(datapath_val, side=side, stride=stride, timing=timing, dT_ms=None, H=H, W=W), # optionally pass DELTA_MS
-                                          timing=timing, H=H, W=W, viz_flow=viz_flow, **kwargs)
+                                          timing=timing, H=H, W=W, viz_flow=viz_flow,
+                                          save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path, voxel_size=voxel_size, **kwargs)
 
             # load traj
             tss_traj_us, traj_hf = load_gt_us(traj_hf_path)
@@ -60,6 +64,10 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
                 viz_flow_inference(outfolder, flowdata)
             
         print(scene, sorted(results_dict_scene[scene]))
+
+    if outfolder is None:
+        print("No scenes were evaluated. Check your datapath and split file.")
+        return results_dict_scene, None
 
     # write output to file with timestamp
     write_raw_results(all_results, outfolder)
@@ -89,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--expname', type=str, default="")
     parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
     parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
+    parser.add_argument('--voxel_size', type=float, default=0.05, help="Voxel size for point cloud downsampling")
 
     args = parser.parse_args()
     assert_eval_config(args)
@@ -105,7 +114,7 @@ if __name__ == '__main__':
     val_results, val_figures = evaluate(cfg, args, args.weights, datapath=args.datapath, split_file=args.val_split, trials=args.trials, \
                        plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
                         side=args.side, stride=args.stride, viz_flow=args.viz_flow, 
-                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path)
+                        save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path, voxel_size=args.voxel_size)
     
     print("val_results= \n")
     for k in val_results:

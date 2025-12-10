@@ -126,12 +126,19 @@ class PatchSelector():
             _, _, h2, w2, _ = scores_grid.shape
             scores_t = scores_grid.view(b*n,h2*w2,(self.GRID**2)).transpose(-2,-1).contiguous().view(b*n*(self.GRID**2),h2*w2) # (b,n,h2*w2,GRID*GRID) -> (b,n,GRID*GRID,h2*w2) -> (b*n*GRID*GRID,h2*w2)
             scores_t += 1e-7 # to fulfill non-zero sum
-            idx = torch.multinomial(scores_t, patches_per_image//(self.GRID**2)) # (b*n*GRID*GRID,patches_per_image/(GRID*GRID))
+            idx = torch.multinomial(
+                scores_t,
+                patches_per_image//(self.GRID**2),
+                replacement=True) # (b*n*GRID*GRID,patches_per_image/(GRID*GRID))
             idx = idx.view(b*n,self.GRID**2,-1).transpose(-2,-1) # -> (b*n,patches_per_image/(GRID*GRID),GRID*GRID)
             idx = self._grid2_idx_up(idx, scores_grid) # (b*n,patches_per_image)
         else:
             avg_scores = avg_scores.view(b*n,-1) # (b*n,h1*w1)
-            idx = torch.multinomial(avg_scores, patches_per_image) # (b*n,patches_per_image)
+            avg_scores += 1e-7 # prevent zero-sum rows
+            idx = torch.multinomial(
+                avg_scores,
+                patches_per_image,
+                replacement=True) # (b*n,patches_per_image)
         
         # 3) multinomial sampling for index
         idx_gather = idx[...,None].repeat(1,1,self.KERNEL_SIZE*self.KERNEL_SIZE) # -> (b*n,patches_per_image,KERNEL_SIZE*KERNEL_SIZE)
@@ -284,4 +291,3 @@ class PatchSelector():
         x = (x - padding_w_left).clamp(min=0, max=w-1)
         y = (y - padding_h_top).clamp(min=0, max=h-1)
         return (x,y)
-

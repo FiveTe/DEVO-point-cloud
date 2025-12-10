@@ -113,6 +113,8 @@ lightweight.
 - Requesting observables incurs a small sync and copy overhead when
   `return_observables=True`.
 
+If you also need RGB values for each point (e.g., to save COLMAP text files), pass `return_colors=True` to the helper or `include_colors=True` to `DEVO.terminate`. The functions then append a `(N, 3)` float array (range `[0, 1]`) with per-point colors converted from `self.colors_`.
+
 That’s all—call the helper with the new flag whenever you need the sparse map. 
 If additional export formats are useful (e.g. direct `.ply` serialization), feel
 free to extend the helper with a simple writer.

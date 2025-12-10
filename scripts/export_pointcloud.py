@@ -1,4 +1,4 @@
-import argparse, os
+import argparse, os, json
 import numpy as np
 from devo.config import cfg
 from utils.eval_utils import run_voxel
@@ -17,6 +17,7 @@ def build_arg_parser(datapath_required=True):
     parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
     parser.add_argument('--export_frame_data', action="store_true", help="Export per-frame sparse point clouds, depths, and metadata to disk")
     parser.add_argument('--frame_data_out', type=str, default=None, help="Path for the per-frame .npz bundle (defaults to <out>_frames.npz)")
+    parser.add_argument('--save_dpviewer_cloud', action="store_true", help="Accumulate DPViewer-style point cloud and save to disk")
     parser.add_argument('--dataset', choices=["fpv", "rpg", "vector"], default="fpv", help="Dataset type to choose iterator/geometry")
     parser.add_argument('--stride', type=int, default=1, help="Frame/event stride for the iterator")
     parser.add_argument('--side', type=str, default="left", help="Camera side (used for stereo datasets such as RPG)")
@@ -28,6 +29,14 @@ def build_arg_parser(datapath_required=True):
 
 def run_export_pointcloud(args):
     cfg.merge_from_file(args.config)
+
+    base, ext = os.path.splitext(args.out)
+    if ext == "":
+        ext = ".npy"
+    pointcloud_path = base + ext
+    dense_points_path = None
+    if args.save_dpviewer_cloud:
+        dense_points_path = base + "_dpviewer" + ext
 
     dataset = args.dataset.lower()
     if dataset == "fpv":
@@ -42,6 +51,13 @@ def run_export_pointcloud(args):
         iterator = rpg_evs_iterator(args.datapath, side=args.side, stride=args.stride)
         H, W = 180, 240
     elif dataset == "vector":
+        intr_path = os.path.join(args.datapath, f"calib_undist_evs_{args.side}.txt")
+        intrinsics = None
+        if os.path.exists(intr_path):
+            try:
+                intrinsics = np.loadtxt(intr_path)
+            except Exception as exc:
+                print(f"Warning: failed to load intrinsics from {intr_path}: {exc}")
         iterator = vector_evs_iterator(
             args.datapath,
             side=args.side,
@@ -69,6 +85,8 @@ def run_export_pointcloud(args):
         return_frame_observables=args.export_frame_data,
         save_per_frame_cloud=args.save_per_frame_cloud,
         save_per_frame_cloud_path=args.save_per_frame_cloud_path,
+        accumulate_map=args.save_dpviewer_cloud,
+        full_map_out=dense_points_path,
     )
 
     if args.export_frame_data:
@@ -76,17 +94,34 @@ def run_export_pointcloud(args):
     else:
         poses, tstamps, flow, point_cloud, depths = results
 
-    base, ext = os.path.splitext(args.out)
-    if ext == "":
-        ext = ".npy"
-        pointcloud_path = base + ext
-    else:
-        pointcloud_path = args.out
-
     np.save(pointcloud_path, point_cloud)
     np.save(base + "_depths" + ext, depths)
     np.save(base + "_poses" + ext, poses)
     np.save(base + "_tstamps" + ext, tstamps)
+
+    meta = {
+        "dataset": dataset,
+        "datapath": args.datapath,
+        "side": getattr(args, "side", None),
+        "config": args.config,
+        "weights": args.weights,
+        "start_us": args.start_us,
+        "stop_us": args.stop_us,
+        "H": H,
+        "W": W,
+        "intrinsics_file": intr_path if dataset == "vector" else None,
+        "intrinsics_fx_fy_cx_cy": intrinsics.tolist() if dataset == "vector" and intrinsics is not None else None,
+        "start_pose_xyz_quat_xyzw": poses[0].tolist() if poses is not None and len(poses) > 0 else None,
+        "start_timestamp_us": float(tstamps[0]) if tstamps is not None and len(tstamps) > 0 else None,
+        "num_poses": int(len(poses)) if poses is not None else 0,
+        "point_cloud_shape": list(point_cloud.shape) if point_cloud is not None else None,
+        "depths_shape": list(depths.shape) if depths is not None else None,
+        "flow_saved": flow is not None,
+        "export_frame_data": args.export_frame_data,
+        "save_per_frame_cloud": args.save_per_frame_cloud,
+    }
+    with open(base + "_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
 
     if flow is not None:
         np.save(base + "_flow" + ext, flow, allow_pickle=True)

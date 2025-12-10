@@ -20,6 +20,7 @@ from devo.plot_utils import plot_trajectory, fig_trajectory
 from devo.plot_utils import save_trajectory_tum_format
 
 from utils.viz_utils import show_image, visualize_voxel
+from utils.pcd_utils import PointCloudAccumulator
 
 from evo.tools import file_interface
 import evo.main_ape as main_ape
@@ -35,7 +36,23 @@ from evo.core.trajectory import PoseTrajectory3D
 # plt.show()
 
 @torch.no_grad()
-def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, return_observables=False, return_frame_observables=False, **kwargs): 
+def run_rgb(
+    imagedir,
+    cfg,
+    network,
+    viz=False,
+    iterator=None,
+    timing=False,
+    H=480,
+    W=640,
+    viz_flow=False,
+    return_observables=False,
+    return_frame_observables=False,
+    return_colors=False,
+    **kwargs,
+):
+    if return_colors and not return_observables:
+        raise ValueError("return_colors=True requires return_observables=True")
     record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
     slam = DEVO(cfg, network, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
     
@@ -54,17 +71,26 @@ def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=48
     for _ in range(12):
         slam.update()
 
+    frame_data = None
+    colors = None
     if return_observables and return_frame_observables:
-        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+        outputs = slam.terminate(return_observables=True, return_frame_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors, frame_data = outputs
+        else:
+            poses, tstamps, point_cloud, depths, frame_data = outputs
     elif return_observables:
-        poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
-        frame_data = None
+        outputs = slam.terminate(return_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors = outputs
+        else:
+            poses, tstamps, point_cloud, depths = outputs
     elif return_frame_observables:
         poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
-        point_cloud, depths = None, None
+        point_cloud = depths = None
     else:
         poses, tstamps = slam.terminate()
-        point_cloud = depths = frame_data = None
+        point_cloud = depths = None
 
     if timing:
         t1.record()
@@ -74,8 +100,12 @@ def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=48
     
     flowdata = slam.flow_data if viz_flow else None
     if return_observables and return_frame_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors, frame_data
         return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors
         return poses, tstamps, flowdata, point_cloud, depths
     if return_frame_observables:
         return poses, tstamps, flowdata, frame_data
@@ -83,7 +113,25 @@ def run_rgb(imagedir, cfg, network, viz=False, iterator=None, timing=False, H=48
 
 
 @torch.no_grad()
-def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, N_norm=15, return_observables=False, return_frame_observables=False, **kwargs): 
+def run_voxel_norm_seq(
+    voxeldir,
+    cfg,
+    network,
+    viz=False,
+    iterator=None,
+    timing=False,
+    H=480,
+    W=640,
+    viz_flow=False,
+    scale=1.0,
+    N_norm=15,
+    return_observables=False,
+    return_frame_observables=False,
+    return_colors=False,
+    **kwargs,
+):
+    if return_colors and not return_observables:
+        raise ValueError("return_colors=True requires return_observables=True")
     record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
     slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
     
@@ -118,22 +166,35 @@ def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=
     for _ in range(12):
         slam.update()
 
+    frame_data = None
+    colors = None
     if return_observables and return_frame_observables:
-        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+        outputs = slam.terminate(return_observables=True, return_frame_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors, frame_data = outputs
+        else:
+            poses, tstamps, point_cloud, depths, frame_data = outputs
     elif return_observables:
-        poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
-        frame_data = None
+        outputs = slam.terminate(return_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors = outputs
+        else:
+            poses, tstamps, point_cloud, depths = outputs
     elif return_frame_observables:
         poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
-        point_cloud, depths = None, None
+        point_cloud = depths = None
     else:
         poses, tstamps = slam.terminate()
-        point_cloud = depths = frame_data = None
+        point_cloud = depths = None
 
     flowdata = slam.flow_data if viz_flow else None
     if return_observables and return_frame_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors, frame_data
         return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors
         return poses, tstamps, flowdata, point_cloud, depths
     if return_frame_observables:
         return poses, tstamps, flowdata, frame_data
@@ -141,15 +202,64 @@ def run_voxel_norm_seq(voxeldir, cfg, network, viz=False, iterator=None, timing=
 
 
 @torch.no_grad()
-def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=480, W=640, viz_flow=False, scale=1.0, return_observables=False, return_frame_observables=False, **kwargs): 
+def run_voxel(
+    voxeldir,
+    cfg,
+    network,
+    viz=False,
+    iterator=None,
+    timing=False,
+    H=480,
+    W=640,
+    viz_flow=False,
+    scale=1.0,
+    return_observables=False,
+    return_frame_observables=False,
+    return_colors=False,
+    save_per_frame_cloud=False,
+    save_per_frame_cloud_path="results/clouds",
+    voxel_size=0.05,
+    debug=False,
+    accumulate_map=False,
+    full_map_out=None,
+    full_map_color_out=None,
+    **kwargs,
+):
+    if return_colors and not return_observables:
+        raise ValueError("return_colors=True requires return_observables=True")
     record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
-    slam = DEVO(cfg, network, evs=True, ht=H, wd=W, viz=viz, viz_flow=viz_flow, record_frame_observables=record_frame_observables, **kwargs)
+    slam = DEVO(
+        cfg,
+        network,
+        evs=True,
+        ht=H,
+        wd=W,
+        viz=viz,
+        viz_flow=viz_flow,
+        record_frame_observables=record_frame_observables,
+        save_per_frame_cloud=save_per_frame_cloud,
+        save_per_frame_cloud_path=save_per_frame_cloud_path,
+        debug_viewer=debug,
+        accumulate_map=accumulate_map,
+        **kwargs,
+    )
     
+    accumulator = None
+    if save_per_frame_cloud:
+        accumulator = PointCloudAccumulator(save_per_frame_cloud_path, voxel_size=voxel_size)
+
+    frames_processed = 0
+
     for i, (voxel, intrinsics, t) in enumerate(iterator):
         if timing and i == 0:
             t0 = torch.cuda.Event(enable_timing=True)
             t1 = torch.cuda.Event(enable_timing=True)
             t0.record()
+        frames_processed += 1
+
+        if debug:
+            nonzero = (voxel.abs() > 1e-6).sum().item()
+            print(f"[DEBUG][run_voxel] Frame {i} ts={t:.3f}us, voxel shape={tuple(voxel.shape)}, nonzero={nonzero}")
 
         if viz: 
             # import matplotlib.pyplot as plt
@@ -159,31 +269,73 @@ def run_voxel(voxeldir, cfg, network, viz=False, iterator=None, timing=False, H=
         with Timer("DEVO", enabled=timing):
             slam(t, voxel, intrinsics, scale=scale)
 
+        if debug:
+            num_points = None
+            if hasattr(slam, "pg") and hasattr(slam.pg, "points_"):
+                try:
+                    num_points = slam.pg.points_.shape[0]
+                except Exception:
+                    num_points = None
+            num_kf = getattr(getattr(slam, "pg", None), "m", None)
+            print(f"[DEBUG][run_voxel] After frame {i}: accepted_points={num_points}, active_keyframes={num_kf}")
+        
+        if save_per_frame_cloud and accumulator is not None:
+             points, _, _ = slam._extract_sparse_map(include_colors=True)
+             accumulator.add_points(points)
+
     for _ in range(12):
         slam.update()
 
+    if save_per_frame_cloud and accumulator is not None:
+        accumulator.save_combined_map()
+        accumulator.cleanup_individual_files()
+
+    frame_data = None
+    colors = None
     if return_observables and return_frame_observables:
-        poses, tstamps, point_cloud, depths, frame_data = slam.terminate(return_observables=True, return_frame_observables=True)
+        outputs = slam.terminate(return_observables=True, return_frame_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors, frame_data = outputs
+        else:
+            poses, tstamps, point_cloud, depths, frame_data = outputs
     elif return_observables:
-        poses, tstamps, point_cloud, depths = slam.terminate(return_observables=True)
-        frame_data = None
+        outputs = slam.terminate(return_observables=True, include_colors=return_colors)
+        if return_colors:
+            poses, tstamps, point_cloud, depths, colors = outputs
+        else:
+            poses, tstamps, point_cloud, depths = outputs
     elif return_frame_observables:
         poses, tstamps, frame_data = slam.terminate(return_frame_observables=True)
-        point_cloud, depths = None, None
+        point_cloud = depths = None
     else:
         poses, tstamps = slam.terminate()
-        point_cloud = depths = frame_data = None
+        point_cloud = depths = None
 
     if timing:
         t1.record()
         torch.cuda.synchronize()
         dt = t0.elapsed_time(t1)/1e3
         print(f"{voxeldir}\nDEVO Network {i+1} frames in {dt} sec, e.g. {(i+1)/dt} FPS")
+
+    if accumulate_map and full_map_out is not None:
+        include_colors = full_map_color_out is not None
+        slam.save_accumulated_map(full_map_out, full_map_color_out if include_colors else None)
+
+    if debug:
+        pc_shape = None if 'point_cloud' not in locals() or point_cloud is None else point_cloud.shape
+        depth_shape = None if 'depths' not in locals() or depths is None else depths.shape
+        print(f"[DEBUG][run_voxel] Completed processing {frames_processed} frames. "
+              f"Point cloud shape: {pc_shape}, Depth shape: {depth_shape}, "
+              f"Poses shape: {poses.shape if 'poses' in locals() else None}")
     
     flowdata = slam.flow_data if viz_flow else None
     if return_observables and return_frame_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors, frame_data
         return poses, tstamps, flowdata, point_cloud, depths, frame_data
     if return_observables:
+        if return_colors:
+            return poses, tstamps, flowdata, point_cloud, depths, colors
         return poses, tstamps, flowdata, point_cloud, depths
     if return_frame_observables:
         return poses, tstamps, flowdata, frame_data

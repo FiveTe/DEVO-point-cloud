@@ -956,7 +956,7 @@ def get_imstart_imstop_vector(indir):
  
     return imstart, imstop
 
-def vector_evs_iterator(indir, side="left", stride=1, dT_ms=None, timing=False, H=480, W=640, cors=4):
+def vector_evs_iterator(indir, side="left", stride=1, dT_ms=None, timing=False, H=480, W=640, cors=4, t_start_us=None, t_stop_us=None):
     if timing:
         t0 = torch.cuda.Event(enable_timing=True)
         t1 = torch.cuda.Event(enable_timing=True)
@@ -973,6 +973,10 @@ def vector_evs_iterator(indir, side="left", stride=1, dT_ms=None, timing=False, 
 
     trafos = None
     tss_imgs_us = np.loadtxt(os.path.join(indir, f"tss_imgs_us_{side}.txt"))
+    if t_start_us is not None:
+        tss_imgs_us = tss_imgs_us[tss_imgs_us >= t_start_us]
+    if t_stop_us is not None:
+        tss_imgs_us = tss_imgs_us[tss_imgs_us <= t_stop_us]
 
     if dT_ms is None:
         dT_ms = np.mean(np.diff(tss_imgs_us)) / 1e3 # 33.3
@@ -1186,7 +1190,19 @@ def hku_evs_iterator(indir, side="left", stride=1, timing=False, dT_ms=None, H=2
 
 #     return data_list
     
-def fpv_evs_iterator(scenedir, stride=1, timing=False, dT_ms=None, H=260, W=346, parallel=False, cors=4, tss_gt_us=None):
+def fpv_evs_iterator(
+    scenedir,
+    stride=1,
+    timing=False,
+    dT_ms=None,
+    H=260,
+    W=346,
+    parallel=False,
+    cors=4,
+    tss_gt_us=None,
+    t_start_us=None,
+    t_stop_us=None,
+):
     if timing:
         t0 = torch.cuda.Event(enable_timing=True)
         t1 = torch.cuda.Event(enable_timing=True)
@@ -1222,7 +1238,24 @@ def fpv_evs_iterator(scenedir, stride=1, timing=False, dT_ms=None, H=260, W=346,
         dT_ms = np.mean(np.diff(tss_imgs_us)) / 1e3
     assert dT_ms > 3 and dT_ms < 200
 
+    tss_imgs_us = np.asarray(tss_imgs_us, dtype=np.int64)
     tss_imgs_us = tss_imgs_us[imstart:imstop:stride]
+
+    if t_start_us is not None or t_stop_us is not None:
+        # clamp to sequence bounds
+        t_min = tss_imgs_us[0]
+        t_max = tss_imgs_us[-1]
+        start = t_start_us if t_start_us is not None else t_min
+        stop = t_stop_us if t_stop_us is not None else t_max
+        start = max(start, t_min)
+        stop = min(stop, t_max)
+        if stop <= start:
+            raise ValueError(f"Invalid FPV time window [{start}, {stop}] for {scenedir}")
+        mask = (tss_imgs_us >= start) & (tss_imgs_us <= stop)
+        tss_imgs_us = tss_imgs_us[mask]
+        evs_mask = (evs[:, 0] >= start) & (evs[:, 0] <= stop + dT_ms * 1e3)
+        evs = evs[evs_mask]
+        print(f"Clipped FPV sequence to [{start:.0f}, {stop:.0f}] us ({len(tss_imgs_us)} frames)")
 
     if parallel:
         tss_imgs_us_split = np.array_split(tss_imgs_us, cors)

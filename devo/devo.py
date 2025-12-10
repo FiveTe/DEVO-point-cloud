@@ -21,7 +21,7 @@ from utils.viz_utils import visualize_voxel
 
 
 class DEVO:
-    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32, save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", record_frame_observables=False):
+    def __init__(self, cfg, network, evs=False, ht=480, wd=640, viz=False, viz_flow=False, dim_inet=384, dim_fnet=128, dim=32, save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", record_frame_observables=False, debug_viewer=False, accumulate_map=False):
         self.cfg = cfg
         self.evs = evs
 
@@ -42,6 +42,9 @@ class DEVO:
         
         self.record_frame_observables = record_frame_observables
         self.frame_observables = []
+        self.accumulate_map = accumulate_map
+        self.full_map_points = []
+        self.full_map_colors = []
         
         self.n = 0      # active keyframes/frames (every frames == keyframe)
         self.m = 0      # number active patches
@@ -106,7 +109,8 @@ class DEVO:
         self.delta = {}
 
         self.viewer = None
-        if viz:
+        self.debug_viewer = debug_viewer
+        if viz or debug_viewer:
             self.start_viewer()
 
     def load_weights(self, network):
@@ -148,14 +152,34 @@ class DEVO:
     def start_viewer(self):
         from dpviewer import Viewer
 
-        intrinsics_ = torch.zeros(1, 4, dtype=torch.float32, device="cuda")
-
         self.viewer = Viewer(
             self.image_,
             self.poses_,
             self.points_,
             self.colors_,
-            intrinsics_)
+            self.intrinsics_)
+
+    def _viewer_propagate_tail(self, include_points=True):
+        """Propagate the most recent pose/point estimates to the viewer's unused slots."""
+        if self.viewer is None or self.n == 0:
+            return
+
+        tail_frames = self.N - self.n
+        last_idx = self.n - 1
+        if tail_frames > 0:
+            last_pose = self.poses_[last_idx:last_idx + 1]
+            last_color = self.colors_[last_idx:last_idx + 1]
+            last_intr = self.intrinsics_[last_idx:last_idx + 1]
+
+            self.poses_[self.n:] = last_pose.expand(tail_frames, -1)
+            self.colors_[self.n:] = last_color.expand(tail_frames, -1, -1)
+            self.intrinsics_[self.n:] = last_intr.expand(tail_frames, -1)
+
+        if include_points and self.m > 0:
+            tail_points = self.points_.shape[0] - self.m
+            if tail_points > 0:
+                last_point = self.points_[self.m - 1:self.m]
+                self.points_[self.m:] = last_point.expand(tail_points, -1)
 
     @property
     def poses(self):
@@ -192,13 +216,14 @@ class DEVO:
         t0, dP = self.delta[t]
         return dP * self.get_pose(t0)
 
-    def _extract_sparse_map(self, patch_slice=None):
-        """Return XYZ points and depths for the current sparse map or a slice."""
+    def _extract_sparse_map(self, patch_slice=None, include_colors=False):
+        """Return XYZ points, depths, and optionally colors for the sparse map."""
         if self.m == 0:
-            return (
-                np.zeros((0, 3), dtype=np.float32),
-                np.zeros((0,), dtype=np.float32),
-            )
+            empty_pc = np.zeros((0, 3), dtype=np.float32)
+            empty_depth = np.zeros((0,), dtype=np.float32)
+            if include_colors:
+                return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32)
+            return empty_pc, empty_depth
 
         start = 0
         end = self.m
@@ -207,10 +232,11 @@ class DEVO:
             end = min(int(patch_slice[1]), self.m)
 
         if end <= start:
-            return (
-                np.zeros((0, 3), dtype=np.float32),
-                np.zeros((0,), dtype=np.float32),
-            )
+            empty_pc = np.zeros((0, 3), dtype=np.float32)
+            empty_depth = np.zeros((0,), dtype=np.float32)
+            if include_colors:
+                return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32)
+            return empty_pc, empty_depth
 
         patches = self.patches[:, start:end]
         ix = self.ix[start:end]
@@ -226,13 +252,66 @@ class DEVO:
             .numpy()
         )
 
+        colors = None
+        if include_colors:
+            colors = self.colors_.reshape(self.N * self.M, 3)[start:end]
+            colors = (colors.to(torch.float32) / 255.0).cpu().numpy()
+
         valid_mask = np.isfinite(point_cloud).all(axis=1)
         point_cloud = point_cloud[valid_mask]
         depths = depths[valid_mask]
+        if include_colors:
+            colors = colors[valid_mask]
+            return point_cloud, depths, colors
 
         return point_cloud, depths
 
-    def terminate(self, return_observables=False, return_frame_observables=False):
+    def _record_full_map_snapshot(self):
+        """Cache the current sparse map so we can approximate DPViewer's union."""
+        if not self.accumulate_map or not self.is_initialized:
+            return
+
+        outputs = self._extract_sparse_map(include_colors=True)
+        point_cloud, _, colors = outputs
+        if point_cloud.size == 0:
+            return
+
+        self.full_map_points.append(point_cloud)
+        self.full_map_colors.append(colors)
+
+    def get_accumulated_map(self, include_colors=False):
+        """Return the concatenation of all cached sparse-map snapshots."""
+        if not self.full_map_points:
+            empty = np.zeros((0, 3), dtype=np.float32)
+            if include_colors:
+                return empty, np.zeros((0, 3), dtype=np.float32)
+            return empty
+
+        points = np.concatenate(self.full_map_points, axis=0)
+        if include_colors:
+            if self.full_map_colors:
+                colors = np.concatenate(self.full_map_colors, axis=0)
+            else:
+                colors = np.zeros((points.shape[0], 3), dtype=np.float32)
+            return points, colors
+        return points
+
+    def save_accumulated_map(self, points_path, colors_path=None):
+        """Persist the accumulated sparse map to disk."""
+        if not self.accumulate_map:
+            raise RuntimeError("Map accumulation was not enabled for this DEVO instance.")
+
+        include_colors = colors_path is not None
+        data = self.get_accumulated_map(include_colors=include_colors)
+
+        if include_colors:
+            points, colors = data
+            np.save(points_path, points)
+            np.save(colors_path, colors)
+        else:
+            np.save(points_path, data)
+
+    def terminate(self, return_observables=False, return_frame_observables=False, include_colors=False):
         """Interpolate missing poses and optionally export sparse map data.
 
         Args:
@@ -240,7 +319,11 @@ class DEVO:
                 point cloud and per-patch depth values as NumPy arrays.
             return_frame_observables (bool): If True, also return per-frame
                 sparse point clouds with timestamps, poses, and intrinsics.
+            include_colors (bool): If True, append RGB colors for each sparse point.
         """
+        if include_colors and not return_observables:
+            raise ValueError("include_colors=True requires return_observables=True")
+
         print("keyframes", self.n)
         self.traj = {}
         for i in range(self.n):
@@ -260,6 +343,8 @@ class DEVO:
 
         if self.viewer is not None:
             self.viewer.join()
+        if self.accumulate_map:
+            self._record_full_map_snapshot()
 
         frame_data = None
         if return_frame_observables:
@@ -277,9 +362,19 @@ class DEVO:
                 )
 
         if return_observables:
-            point_cloud, depths = self._extract_sparse_map()
+            map_outputs = self._extract_sparse_map(include_colors=include_colors)
+            if include_colors:
+                point_cloud, depths, colors = map_outputs
+            else:
+                point_cloud, depths = map_outputs
+
             if return_frame_observables:
+                if include_colors:
+                    return poses, tstamps, point_cloud, depths, colors, frame_data
                 return poses, tstamps, point_cloud, depths, frame_data
+
+            if include_colors:
+                return poses, tstamps, point_cloud, depths, colors
             return poses, tstamps, point_cloud, depths
 
         if return_frame_observables:
@@ -385,6 +480,9 @@ class DEVO:
         to_remove = self.ix[self.kk] < self.n - self.cfg.REMOVAL_WINDOW
         self.remove_factors(to_remove)
 
+        if self.viewer is not None:
+            self._viewer_propagate_tail()
+
     def update(self):
         coords = self.reproject()
 
@@ -422,6 +520,12 @@ class DEVO:
             points = pops.point_cloud(SE3(self.poses), self.patches[:, :self.m], self.intrinsics, self.ix[:self.m])
             points = (points[...,1,1,:3] / points[...,1,1,3:]).reshape(-1, 3)
             self.points_[:len(points)] = points[:]
+
+        if self.accumulate_map:
+            self._record_full_map_snapshot()
+
+        if self.viewer is not None:
+            self._viewer_propagate_tail()
 
     def save_cloud(self, frame_id):
         point_cloud, _ = self._extract_sparse_map()
@@ -647,6 +751,9 @@ class DEVO:
 
         self.n += 1 # add one (key)frame
         self.m += self.M # add patches per (key)frames to patch number
+
+        if self.viewer is not None:
+            self._viewer_propagate_tail(include_points=False)
 
         # relative pose
         self.append_factors(*self.__edges_forw())

@@ -1,4 +1,6 @@
+import json
 import os
+import numpy as np
 import torch
 from devo.config import cfg
 
@@ -11,10 +13,63 @@ from utils.pcd_utils import save_point_clouds_to_ply
 H, W = 480, 640
 
 
+def load_vector_intrinsics(scene_path, side):
+    intr_path = os.path.join(scene_path, f"calib_undist_evs_{side}.txt")
+    if not os.path.exists(intr_path):
+        print(f"Warning: could not find intrinsics at {intr_path}")
+        return None, intr_path
+    try:
+        intrinsics = np.loadtxt(intr_path)
+    except Exception as exc:
+        print(f"Warning: failed to read intrinsics from {intr_path}: {exc}")
+        intrinsics = None
+    return intrinsics, intr_path
+
+
+def log_camera_metadata(save_dir, dataset_name, scene, trial_idx, side, poses, timestamps, intrinsics, intr_path, start_us=None, stop_us=None):
+    os.makedirs(save_dir, exist_ok=True)
+    safe_scene = scene.replace("/", "_")
+    base_name = f"{dataset_name}_{safe_scene}_trial{trial_idx+1:02d}"
+    json_path = os.path.join(save_dir, f"{base_name}_camera_info.json")
+    npz_path = os.path.join(save_dir, f"{base_name}_camera_info.npz")
+
+    start_pose = None
+    start_timestamp = None
+    if poses is not None and len(poses) > 0:
+        start_pose = np.asarray(poses)[0].tolist()
+    if timestamps is not None and len(timestamps) > 0:
+        start_timestamp = float(np.asarray(timestamps)[0])
+
+    metadata = {
+        "dataset": dataset_name,
+        "scene": scene,
+        "trial": trial_idx + 1,
+        "side": side,
+        "start_timestamp_us": start_timestamp,
+        "start_pose_xyz_quat_xyzw": start_pose,
+        "intrinsics_fx_fy_cx_cy": intrinsics.tolist() if intrinsics is not None else None,
+        "intrinsics_path": intr_path,
+        "t_start_filter_us": start_us,
+        "t_stop_filter_us": stop_us,
+        "poses_file": os.path.basename(npz_path),
+    }
+
+    with open(json_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    np.savez(
+        npz_path,
+        poses=np.asarray(poses) if poses is not None else np.zeros((0, 7), dtype=np.float32),
+        timestamps=np.asarray(timestamps) if timestamps is not None else np.zeros((0,), dtype=np.float64),
+        intrinsics=np.asarray(intrinsics) if intrinsics is not None else np.zeros((0,), dtype=np.float32),
+    )
+    print(f"Saved camera metadata to {json_path}")
+
+
 @torch.no_grad()
 def evaluate(config, args, net, train_step=None, datapath="", split_file=None, 
              trials=1, stride=1, plot=False, save=False, return_figure=False, viz=False, timing=False, side='left', viz_flow=False, dT_ms=None,
-             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", start_us=None, stop_us=None):
+             save_per_frame_cloud=False, save_per_frame_cloud_path="results/clouds", start_us=None, stop_us=None, voxel_size=0.05):
     dataset_name = "vector_evs"
     assert side == "left" or side == "right"
 
@@ -35,12 +90,31 @@ def evaluate(config, args, net, train_step=None, datapath="", split_file=None,
             max_diff_sec *= (dT_ms / 33)
         datapath_val = os.path.join(datapath, scene)
         for trial in range(trials):
+            intrinsics = None
+            intr_path = None
+            if save_per_frame_cloud:
+                intrinsics, intr_path = load_vector_intrinsics(datapath_val, side)
             # run the slam system
             traj_est, tstamps, flowdata = run_voxel(datapath_val, config, net, viz=viz, 
                                           iterator=vector_evs_iterator(datapath_val, side, stride=stride, dT_ms=dT_ms, timing=timing, H=H, W=W,
                                                                        t_start_us=start_us, t_stop_us=stop_us),
                                           timing=timing, H=H, W=W, viz_flow=viz_flow,
-                                          save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path)
+                                          save_per_frame_cloud=save_per_frame_cloud, save_per_frame_cloud_path=save_per_frame_cloud_path, voxel_size=voxel_size)
+
+            if save_per_frame_cloud:
+                log_camera_metadata(
+                    save_per_frame_cloud_path,
+                    dataset_name,
+                    scene,
+                    trial,
+                    side,
+                    traj_est,
+                    tstamps,
+                    intrinsics,
+                    intr_path,
+                    start_us=start_us,
+                    stop_us=stop_us,
+                )
 
             # load  traj
             tss_traj_us, traj_hf = load_gt_us(os.path.join(datapath_val, f"poses_evs_{side}.txt"))
@@ -85,6 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('--expname', type=str, default="")
     parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
     parser.add_argument('--save_per_frame_cloud_path', type=str, default="results/clouds", help="Path to save per-frame point clouds")
+    parser.add_argument('--voxel_size', type=float, default=0.05, help="Voxel size for point cloud downsampling")
     parser.add_argument('--start_us', type=float, default=None, help="Restrict evaluation to timestamps >= start_us (microseconds)")
     parser.add_argument('--stop_us', type=float, default=None, help="Restrict evaluation to timestamps <= stop_us (microseconds)")
 
@@ -103,7 +178,7 @@ if __name__ == '__main__':
                         plot=args.plot, save=args.save_trajectory, return_figure=args.return_figs, viz=args.viz, timing=args.timing, \
                         stride=args.stride, side=args.side, viz_flow=args.viz_flow,
                         save_per_frame_cloud=args.save_per_frame_cloud, save_per_frame_cloud_path=args.save_per_frame_cloud_path,
-                        start_us=args.start_us, stop_us=args.stop_us)
+                        start_us=args.start_us, stop_us=args.stop_us, voxel_size=args.voxel_size)
     
     print("val_results= \n")
     for k in val_results:

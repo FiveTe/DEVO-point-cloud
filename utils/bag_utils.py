@@ -1,19 +1,29 @@
-import rosbag
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-from io import StringIO
-import sys
-from PIL import Image
-import io
+from utils import rosbag_compat as rosbag
 import tqdm as tqdm
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 
+def _to_nsec(stamp):
+    if hasattr(stamp, "to_nsec"):
+        return stamp.to_nsec()
+    sec = getattr(stamp, "sec", None)
+    nsec = getattr(stamp, "nsec", getattr(stamp, "nanosec", None))
+    if sec is not None and nsec is not None:
+        return int(sec) * int(1e9) + int(nsec)
+    raise AttributeError(f"Unsupported time representation: {stamp}")
+
+
+def _get_msg_type(msg):
+    if hasattr(msg, "_type"):
+        return msg._type
+    return getattr(msg, "__msgtype__", "")
+
+
 def read_first_evs_from_rosbag(bag, evtopic):
     for topic, msg, t in bag.read_messages(evtopic):
         for ev in msg.events:
-            t0_us = ev.ts.to_nsec()/1e3
+            t0_us = _to_nsec(ev.ts)/1e3
             break
         break
     return t0_us
@@ -27,7 +37,7 @@ def read_evs_from_rosbag(bag, evtopic, H=180, W=240):
     for topic, msg, t in bag.read_messages(evtopic):
         for ev in msg.events:
             p = 1 if ev.polarity else 0
-            evs.append([ev.x, ev.y, ev.ts.to_nsec()/1e3, p])
+            evs.append([ev.x, ev.y, _to_nsec(ev.ts)/1e3, p])
             # assert ev.x < W and ev.y < H # DEBUG
         progress_bar.update(1)
 
@@ -47,12 +57,10 @@ def read_images_from_rosbag(bag, imgtopic, H=180, W=240):
     
     progress_bar = tqdm.tqdm(total=bag.get_message_count(imgtopic))
     for topic, msg, t in bag.read_messages(imgtopic):
-        img_str = str(msg)
-        img_str = img_str[img_str.find("data")+6:]
-        img_str = img_str[1:-1].split(',')
-        pixel_values = [int(v) for v in img_str]
-        image_array = np.array(pixel_values, dtype=np.uint8)
-        image_array = image_array.reshape((msg.height, msg.width))
+        img_data = np.asarray(msg.data, dtype=np.uint8)
+        if img_data.size != msg.height * msg.width:
+            raise ValueError(f"Unexpected image size: got {img_data.size}, expected {msg.height * msg.width}")
+        image_array = img_data.reshape((msg.height, msg.width))
         imgs.append(image_array)
         progress_bar.update(1)
 
@@ -67,7 +75,7 @@ def read_images_from_rosbag(bag, imgtopic, H=180, W=240):
 def read_tss_us_from_rosbag(bag, imgtopic):
     tss_us = []
     for topic, msg, t in bag.read_messages(imgtopic):
-        tss_us.append(msg.header.stamp.to_nsec() / 1e3)
+        tss_us.append(_to_nsec(msg.header.stamp) / 1e3)
     return tss_us
 
 
@@ -77,7 +85,8 @@ def read_poses_from_rosbag(bag, posestopic, T_marker_cam0, T_cam0_cam1):
     poses = []
     tss_us_gt = []
     for topic, msg, t in bag.read_messages(posestopic):
-        if msg._type == "nav_msgs/Odometry":
+        msg_type = _get_msg_type(msg)
+        if msg_type in ("nav_msgs/Odometry", "nav_msgs/msg/Odometry"):
             ps = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z,
                             msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z, msg.pose.pose.orientation.w])
         else:
@@ -94,7 +103,7 @@ def read_poses_from_rosbag(bag, posestopic, T_marker_cam0, T_cam0_cam1):
         T_world_cam = np.concatenate((T_world_cam[:3, 3], R.from_matrix(T_world_cam[:3, :3]).as_quat()))
         poses.append(T_world_cam)
 
-        tss_us_gt.append(msg.header.stamp.to_nsec() / 1e3)
+        tss_us_gt.append(_to_nsec(msg.header.stamp) / 1e3)
                      
         progress_bar.update(1)
     return np.array(poses), tss_us_gt
@@ -109,7 +118,7 @@ def read_calib_from_bag(bag, imtopic):
 def read_t0us_evs_from_rosbag(bag, evtopic):
     for topic, msg, t in bag.read_messages(evtopic):
         for ev in msg.events:
-            t0_us = ev.ts.to_nsec()/1e3
+            t0_us = _to_nsec(ev.ts)/1e3
             break
         break
     return t0_us

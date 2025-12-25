@@ -1,4 +1,4 @@
-import argparse, os, json
+import argparse, os, json, subprocess, sys
 import numpy as np
 from devo.config import cfg
 from utils.eval_utils import run_voxel
@@ -24,6 +24,14 @@ def build_arg_parser(datapath_required=True):
     parser.add_argument('--start_us', type=float, default=None, help="Start timestamp (microseconds) for FPV sequences")
     parser.add_argument('--stop_us', type=float, default=None, help="Stop timestamp (microseconds) for FPV sequences")
     parser.add_argument('--debug', action='store_true', help="Print detailed per-frame debug info during DEVO processing")
+    parser.add_argument('--convert_ply', action='store_true', help="Convert the output .npy point cloud to .ply format using npy2ply.py")
+    parser.add_argument('--cleanup', action='store_true', help="Run cleanup on the generated .ply file (implies --convert_ply)")
+    parser.add_argument('--cleanup_algo', choices=['sor', 'ror'], default='sor', help="Cleanup algorithm: 'sor' or 'ror'")
+    parser.add_argument('--sor_nb_neighbors', type=int, default=20, help="[SOR] Number of neighbors (default: 20)")
+    parser.add_argument('--sor_std_ratio', type=float, default=2.0, help="[SOR] Standard deviation ratio (default: 2.0)")
+    parser.add_argument('--ror_radius', type=float, default=0.05, help="[ROR] Radius (default: 0.05)")
+    parser.add_argument('--ror_min_neighbors', type=int, default=16, help="[ROR] Min neighbors (default: 16)")
+
     return parser
 
 
@@ -156,6 +164,41 @@ def run_export_pointcloud(args):
             points=points_concat,
             depths=depths_concat,
         )
+
+    if args.cleanup or args.convert_ply:
+        print("\n--- Starting Post-processing ---")
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        npy2ply_script = os.path.join(script_dir, "npy2ply.py")
+        
+        cmd_convert = [sys.executable, npy2ply_script, pointcloud_path]
+        print(f"Running conversion: {' '.join(cmd_convert)}")
+        try:
+            subprocess.check_call(cmd_convert)
+            ply_path = pointcloud_path[:-4] + '.ply'
+        except subprocess.CalledProcessError as e:
+            print(f"Error during npy2ply conversion: {e}")
+            return
+
+        if args.cleanup:
+            cleanup_script = os.path.join(script_dir, "cleanup_pointcloud.py")
+            cmd_cleanup = [
+                sys.executable, cleanup_script,
+                "--input_file", ply_path,
+                "--algorithm", args.cleanup_algo
+            ]
+            
+            if args.cleanup_algo == 'sor':
+                cmd_cleanup.extend(["--nb_neighbors", str(args.sor_nb_neighbors)])
+                cmd_cleanup.extend(["--std_ratio", str(args.sor_std_ratio)])
+            elif args.cleanup_algo == 'ror':
+                cmd_cleanup.extend(["--radius", str(args.ror_radius)])
+                cmd_cleanup.extend(["--min_neighbors", str(args.ror_min_neighbors)])
+            
+            print(f"Running cleanup: {' '.join(cmd_cleanup)}")
+            try:
+                subprocess.check_call(cmd_cleanup)
+            except subprocess.CalledProcessError as e:
+                print(f"Error during cleanup: {e}")
 
 
 if __name__ == "__main__":

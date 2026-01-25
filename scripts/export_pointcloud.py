@@ -148,6 +148,18 @@ def run_export_pointcloud(args):
             points_concat = np.zeros((0, 3), dtype=np.float32)
             depths_concat = np.zeros((0,), dtype=np.float32)
 
+        # Store centers per frame (no concatenation), padded to max points per frame.
+        max_count = int(counts.max()) if counts.size > 0 else 0
+        centers_per_frame = np.full((len(frame_data), max_count, 2), np.nan, dtype=np.float32)
+        for i, entry in enumerate(frame_data):
+            c = entry.get("centers", None)
+            if c is None:
+                continue
+            c = np.asarray(c, dtype=np.float32)
+            n = min(len(c), max_count)
+            if n > 0:
+                centers_per_frame[i, :n] = c[:n]
+
         offsets = np.zeros_like(counts, dtype=np.int64)
         if counts.size > 0:
             offsets[1:] = np.cumsum(counts[:-1], dtype=np.int64)
@@ -163,6 +175,7 @@ def run_export_pointcloud(args):
             offsets=offsets,
             points=points_concat,
             depths=depths_concat,
+            centers=centers_per_frame,
         )
 
     if args.cleanup or args.convert_ply:

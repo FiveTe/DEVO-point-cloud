@@ -122,15 +122,28 @@ class DEVO:
             self.network = VONet(patch_selector=self.cfg.PATCH_SELECTOR) if not self.evs else \
                 eVONet(dim_inet=self.dim_inet, dim_fnet=self.dim_fnet, dim=self.dim, patch_selector=self.cfg.PATCH_SELECTOR)
             if 'model_state_dict' in checkpoint:
-                self.network.load_state_dict(checkpoint['model_state_dict'])
+                state_dict = checkpoint['model_state_dict']
+                # Allow switching patch selection method at eval time. The scorer
+                # module is only constructed when PATCH_SELECTOR='scorer', but
+                # training checkpoints may still contain its weights.
+                if str(self.cfg.PATCH_SELECTOR).lower() != "scorer":
+                    state_dict = {
+                        k: v
+                        for k, v in state_dict.items()
+                        if not (k.startswith("patchify.scorer.") or k.startswith("module.patchify.scorer."))
+                    }
+                self.network.load_state_dict(state_dict, strict=False)
             else:
                 # legacy
                 from collections import OrderedDict
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint.items():
                     if "update.lmbda" not in k:
-                        new_state_dict[k.replace('module.', '')] = v
-                self.network.load_state_dict(new_state_dict)
+                        key = k.replace('module.', '')
+                        if str(self.cfg.PATCH_SELECTOR).lower() != "scorer" and key.startswith("patchify.scorer."):
+                            continue
+                        new_state_dict[key] = v
+                self.network.load_state_dict(new_state_dict, strict=False)
 
         else:
             self.network = network
@@ -216,13 +229,18 @@ class DEVO:
         t0, dP = self.delta[t]
         return dP * self.get_pose(t0)
 
-    def _extract_sparse_map(self, patch_slice=None, include_colors=False):
-        """Return XYZ points, depths, and optionally colors for the sparse map."""
+    def _extract_sparse_map(self, patch_slice=None, include_colors=False, return_centers=False):
+        """Return XYZ points, depths, and optionally colors/centers for the sparse map."""
         if self.m == 0:
             empty_pc = np.zeros((0, 3), dtype=np.float32)
             empty_depth = np.zeros((0,), dtype=np.float32)
+            empty_centers = np.zeros((0, 2), dtype=np.float32)
             if include_colors:
+                if return_centers:
+                    return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32), empty_centers
                 return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32)
+            if return_centers:
+                return empty_pc, empty_depth, empty_centers
             return empty_pc, empty_depth
 
         start = 0
@@ -234,8 +252,13 @@ class DEVO:
         if end <= start:
             empty_pc = np.zeros((0, 3), dtype=np.float32)
             empty_depth = np.zeros((0,), dtype=np.float32)
+            empty_centers = np.zeros((0, 2), dtype=np.float32)
             if include_colors:
+                if return_centers:
+                    return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32), empty_centers
                 return empty_pc, empty_depth, np.zeros((0, 3), dtype=np.float32)
+            if return_centers:
+                return empty_pc, empty_depth, empty_centers
             return empty_pc, empty_depth
 
         patches = self.patches[:, start:end]
@@ -251,6 +274,13 @@ class DEVO:
             .cpu()
             .numpy()
         )
+        centers = (
+            self.patches[:, start:end, :2, self.P // 2, self.P // 2]
+            .reshape(-1, 2)
+            .detach()
+            .cpu()
+            .numpy()
+        )
 
         colors = None
         if include_colors:
@@ -260,10 +290,15 @@ class DEVO:
         valid_mask = np.isfinite(point_cloud).all(axis=1)
         point_cloud = point_cloud[valid_mask]
         depths = depths[valid_mask]
+        centers = centers[valid_mask]
         if include_colors:
             colors = colors[valid_mask]
+            if return_centers:
+                return point_cloud, depths, colors, centers
             return point_cloud, depths, colors
 
+        if return_centers:
+            return point_cloud, depths, centers
         return point_cloud, depths
 
     def _record_full_map_snapshot(self):
@@ -350,16 +385,18 @@ class DEVO:
         if return_frame_observables:
             frame_data = []
             for entry in self.frame_observables:
-                frame_data.append(
-                    {
-                        "frame_id": entry["frame_id"],
-                        "timestamp": entry["timestamp"],
-                        "pose": entry["pose"].copy(),
-                        "intrinsics": entry["intrinsics"].copy(),
-                        "points": entry["points"].copy(),
-                        "depths": entry["depths"].copy(),
-                    }
-                )
+                payload = {
+                    "frame_id": entry["frame_id"],
+                    "timestamp": entry["timestamp"],
+                    "pose": entry["pose"].copy(),
+                    "intrinsics": entry["intrinsics"].copy(),
+                    "points": entry["points"].copy(),
+                    "depths": entry["depths"].copy(),
+                }
+                # Backwards-compatible: older runs may not have recorded centers.
+                if "centers" in entry:
+                    payload["centers"] = entry["centers"].copy()
+                frame_data.append(payload)
 
         if return_observables:
             map_outputs = self._extract_sparse_map(include_colors=include_colors)
@@ -541,11 +578,29 @@ class DEVO:
             return
 
         start = max(self.m - self.M, 0)
-        point_cloud, depths = self._extract_sparse_map((start, self.m))
+        point_cloud, depths, centers = self._extract_sparse_map((start, self.m), return_centers=True)
 
         frame_pose = self.poses_[self.n - 1].detach().cpu().numpy()
         intrinsics = self.intrinsics_[self.n - 1].detach().cpu().numpy()
         timestamp = float(self.tlist[-1])
+
+        # If centers came back empty, pull raw patch centers from the last frame.
+        if centers.size == 0 or not np.any(centers):
+            raw_centers = (
+                self.patches_[self.n - 1, : self.M, :2, self.P // 2, self.P // 2]
+                .reshape(-1, 2)
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            # Mask to valid points only (finite XYZ)
+            if point_cloud.size > 0:
+                valid_mask = np.isfinite(point_cloud).all(axis=1)
+                centers = raw_centers[valid_mask].astype(np.float32)
+                point_cloud = point_cloud[valid_mask]
+                depths = depths[valid_mask]
+            else:
+                centers = raw_centers.astype(np.float32)
 
         self.frame_observables.append(
             {
@@ -555,6 +610,7 @@ class DEVO:
                 "intrinsics": intrinsics,
                 "points": point_cloud,
                 "depths": depths,
+                "centers": centers,
             }
         )
 

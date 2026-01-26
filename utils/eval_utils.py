@@ -1,6 +1,7 @@
 
 import os
 import torch
+import torch.nn.functional as F
 from devo.devo import DEVO
 from devo.utils import Timer
 from pathlib import Path
@@ -14,6 +15,7 @@ import copy
 import math
 import shutil
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial import cKDTree
 from tabulate import tabulate
 
 from devo.plot_utils import plot_trajectory, fig_trajectory
@@ -34,6 +36,122 @@ from evo.core.trajectory import PoseTrajectory3D
 # plt.grid(False)
 # plt.imshow(image.detach().cpu().numpy().transpose(1,2,0))
 # plt.show()
+
+def _voxel_edges_qres_uv(
+    voxel,
+    downsample=4,
+    topk=6000,
+    border=2,
+):
+    """Extract edge-like pixels (quarter-res) from an event voxel grid.
+
+    Args:
+        voxel (Tensor): (bins, H, W) event voxel grid.
+        downsample (int): downsample factor to match DEVO patch coords (default: 4).
+        topk (int): number of edge pixels to return (highest gradient magnitude).
+        border (int): zero-out a border in quarter-res pixels to avoid artifacts.
+
+    Returns:
+        np.ndarray: (N, 2) array of (u, v) pixel coords in quarter-res image space.
+    """
+    if voxel is None:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    # Use absolute event count as an "image" and downsample to DEVO's feature resolution.
+    img = voxel.abs().sum(dim=0, keepdim=False)  # (H, W)
+    img4 = F.avg_pool2d(img[None, None], kernel_size=downsample, stride=downsample).squeeze(0).squeeze(0)
+
+    # Sobel gradient magnitude on quarter-res.
+    dtype = img4.dtype
+    device = img4.device
+    sobel_x = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], device=device, dtype=dtype).view(1, 1, 3, 3)
+    sobel_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], device=device, dtype=dtype).view(1, 1, 3, 3)
+    gx = F.conv2d(img4[None, None], sobel_x, padding=1).squeeze(0).squeeze(0)
+    gy = F.conv2d(img4[None, None], sobel_y, padding=1).squeeze(0).squeeze(0)
+    g = torch.sqrt(gx * gx + gy * gy)
+
+    # Suppress borders.
+    if border > 0:
+        g[:border, :] = 0
+        g[-border:, :] = 0
+        g[:, :border] = 0
+        g[:, -border:] = 0
+
+    flat = g.reshape(-1)
+    if flat.numel() == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    k = int(min(max(topk, 0), flat.numel()))
+    if k == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    vals, idx = torch.topk(flat, k, largest=True, sorted=False)
+    keep = torch.isfinite(vals) & (vals > 0)
+    idx = idx[keep]
+    if idx.numel() == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    h4, w4 = g.shape
+    u = (idx % w4).to(torch.float32)
+    v = torch.div(idx, w4, rounding_mode="floor").to(torch.float32)
+    uv = torch.stack([u, v], dim=-1).detach().cpu().numpy().astype(np.float32)
+    return uv
+
+
+def _edge_cloud_from_frame_observable(
+    frame_obs,
+    edge_uv,
+    knn=4,
+    max_dist=6.0,
+):
+    """Densify inverse depth from DEVO patch centers onto edge pixels and backproject to world."""
+    if frame_obs is None or edge_uv is None or len(edge_uv) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    centers = np.asarray(frame_obs.get("centers", np.zeros((0, 2), dtype=np.float32)), dtype=np.float32)
+    inv_depth = np.asarray(frame_obs.get("depths", np.zeros((0,), dtype=np.float32)), dtype=np.float32)
+    intr = np.asarray(frame_obs.get("intrinsics", np.zeros((4,), dtype=np.float32)), dtype=np.float32)
+    pose = np.asarray(frame_obs.get("pose", np.zeros((7,), dtype=np.float32)), dtype=np.float32)
+
+    if centers.ndim != 2 or centers.shape[1] != 2 or inv_depth.ndim != 1:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    good = np.isfinite(centers).all(axis=1) & np.isfinite(inv_depth) & (inv_depth > 0)
+    centers = centers[good]
+    inv_depth = inv_depth[good]
+    if centers.shape[0] < max(1, int(knn)):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    tree = cKDTree(centers)
+    dist, idx = tree.query(edge_uv, k=int(knn), distance_upper_bound=float(max_dist))
+    dist = np.atleast_2d(dist)
+    idx = np.atleast_2d(idx)
+
+    valid = np.isfinite(dist).all(axis=1) & (idx < centers.shape[0]).all(axis=1)
+    if not np.any(valid):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    edge_uv = np.asarray(edge_uv, dtype=np.float32)[valid]
+    dist = dist[valid]
+    idx = idx[valid]
+
+    w = 1.0 / np.clip(dist, 1e-3, None)
+    inv_d = (w * inv_depth[idx]).sum(axis=1) / np.clip(w.sum(axis=1), 1e-6, None)
+
+    fx, fy, cx, cy = intr.astype(np.float32)
+    u = edge_uv[:, 0]
+    v = edge_uv[:, 1]
+    z = 1.0 / np.clip(inv_d, 1e-6, None)
+    x = (u - cx) / fx * z
+    y = (v - cy) / fy * z
+    pc = np.stack([x, y, z], axis=1).astype(np.float32)  # camera coords
+
+    t = pose[:3].astype(np.float32)
+    q = pose[3:].astype(np.float32)  # xyzw
+    Rcw = R.from_quat(q).as_matrix().astype(np.float32)  # world -> cam
+    pw = (Rcw.T @ (pc - t).T).T.astype(np.float32)
+    return pw
+
 
 @torch.no_grad()
 def run_rgb(
@@ -223,11 +341,22 @@ def run_voxel(
     accumulate_map=False,
     full_map_out=None,
     full_map_color_out=None,
+    export_edge_cloud=False,
+    edge_cloud_out=None,
+    edge_downsample=4,
+    edge_topk=6000,
+    edge_border=2,
+    edge_knn=4,
+    edge_max_dist=6.0,
     **kwargs,
 ):
     if return_colors and not return_observables:
         raise ValueError("return_colors=True requires return_observables=True")
-    record_frame_observables = kwargs.pop("record_frame_observables", False) or return_frame_observables
+    record_frame_observables = (
+        kwargs.pop("record_frame_observables", False)
+        or return_frame_observables
+        or export_edge_cloud
+    )
     slam = DEVO(
         cfg,
         network,
@@ -249,6 +378,8 @@ def run_voxel(
         accumulator = PointCloudAccumulator(save_per_frame_cloud_path, voxel_size=voxel_size)
 
     frames_processed = 0
+    edge_points_accum = []
+    prev_frame_obs_len = 0
 
     for i, (voxel, intrinsics, t) in enumerate(iterator):
         if timing and i == 0:
@@ -268,6 +399,29 @@ def run_voxel(
         
         with Timer("DEVO", enabled=timing):
             slam(t, voxel, intrinsics, scale=scale)
+
+        # If DEVO recorded a new per-keyframe observable, generate an edge-aligned cloud for it.
+        # This mirrors DEVO's own "accumulate_map" idea: keep points even if older keyframes are
+        # later removed from the active window.
+        if export_edge_cloud and record_frame_observables:
+            curr_len = len(getattr(slam, "frame_observables", []))
+            if curr_len > prev_frame_obs_len:
+                frame_obs = slam.frame_observables[-1]
+                edge_uv = _voxel_edges_qres_uv(
+                    voxel,
+                    downsample=edge_downsample,
+                    topk=edge_topk,
+                    border=edge_border,
+                )
+                edge_pw = _edge_cloud_from_frame_observable(
+                    frame_obs,
+                    edge_uv,
+                    knn=edge_knn,
+                    max_dist=edge_max_dist,
+                )
+                if edge_pw.size > 0:
+                    edge_points_accum.append(edge_pw)
+            prev_frame_obs_len = curr_len
 
         if debug:
             num_points = None
@@ -320,6 +474,13 @@ def run_voxel(
     if accumulate_map and full_map_out is not None:
         include_colors = full_map_color_out is not None
         slam.save_accumulated_map(full_map_out, full_map_color_out if include_colors else None)
+
+    if export_edge_cloud and edge_cloud_out is not None:
+        if edge_points_accum:
+            edge_points = np.concatenate(edge_points_accum, axis=0)
+        else:
+            edge_points = np.zeros((0, 3), dtype=np.float32)
+        np.save(edge_cloud_out, edge_points)
 
     if debug:
         pc_shape = None if 'point_cloud' not in locals() or point_cloud is None else point_cloud.shape

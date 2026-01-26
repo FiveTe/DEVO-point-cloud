@@ -72,9 +72,6 @@ def main():
 
     if args.display:
         print("Visualizing result... (Close window to exit)")
-        # Show original in red (faint) and cleaned in original colors or solid color if no colors
-        # For simplicity, just show the cleaned cloud, or compare?
-        # Let's show the cleaned cloud.
         window_name = f"Cleaned Point Cloud ({args.algorithm})"
         o3d.visualization.draw_geometries([cleaned_pcd], window_name=window_name)
 

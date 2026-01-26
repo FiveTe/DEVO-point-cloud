@@ -11,6 +11,21 @@ def build_arg_parser(datapath_required=True):
     parser.add_argument("--datapath", required=datapath_required)
     parser.add_argument("--weights", default="DEVO.pth")
     parser.add_argument("--out", default="point_cloud.npy")
+    parser.add_argument(
+        "--export_edge_cloud",
+        action="store_true",
+        help="Export an edge-aligned point cloud by densifying depths onto event edges (uses scorer for VO accuracy).",
+    )
+    parser.add_argument(
+        "--edge_cloud_out",
+        type=str,
+        default=None,
+        help="Path for the edge point cloud .npy (defaults to <out>_edges.npy).",
+    )
+    parser.add_argument("--edge_topk", type=int, default=6000, help="Number of edge pixels per keyframe (quarter-res).")
+    parser.add_argument("--edge_border", type=int, default=2, help="Border to suppress in quarter-res pixels.")
+    parser.add_argument("--edge_knn", type=int, default=4, help="kNN for inverse-depth interpolation from patch centers.")
+    parser.add_argument("--edge_max_dist", type=float, default=6.0, help="Max kNN radius (quarter-res pixels).")
     parser.add_argument("--viz", action="store_true", help="Enable live DPViewer visualization")
     parser.add_argument("--viz-flow", action="store_true", help="Enable flow computation/output")
     parser.add_argument('--save_per_frame_cloud', action="store_true", help="Save point cloud for each frame")
@@ -42,6 +57,12 @@ def run_export_pointcloud(args):
     if ext == "":
         ext = ".npy"
     pointcloud_path = base + ext
+    out_dir = os.path.dirname(os.path.abspath(pointcloud_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    edge_cloud_path = None
+    if args.export_edge_cloud:
+        edge_cloud_path = args.edge_cloud_out or (base + "_edges" + ext)
     dense_points_path = None
     if args.save_dpviewer_cloud:
         dense_points_path = base + "_dpviewer" + ext
@@ -91,6 +112,12 @@ def run_export_pointcloud(args):
         debug=getattr(args, "debug", False),
         return_observables=True,
         return_frame_observables=args.export_frame_data,
+        export_edge_cloud=args.export_edge_cloud,
+        edge_cloud_out=edge_cloud_path,
+        edge_topk=args.edge_topk,
+        edge_border=args.edge_border,
+        edge_knn=args.edge_knn,
+        edge_max_dist=args.edge_max_dist,
         save_per_frame_cloud=args.save_per_frame_cloud,
         save_per_frame_cloud_path=args.save_per_frame_cloud_path,
         accumulate_map=args.save_dpviewer_cloud,
@@ -113,6 +140,12 @@ def run_export_pointcloud(args):
         "side": getattr(args, "side", None),
         "config": args.config,
         "weights": args.weights,
+        "edge_cloud_exported": bool(args.export_edge_cloud),
+        "edge_cloud_path": edge_cloud_path,
+        "edge_topk": int(args.edge_topk),
+        "edge_border": int(args.edge_border),
+        "edge_knn": int(args.edge_knn),
+        "edge_max_dist": float(args.edge_max_dist),
         "start_us": args.start_us,
         "stop_us": args.stop_us,
         "H": H,
@@ -183,35 +216,42 @@ def run_export_pointcloud(args):
         script_dir = os.path.dirname(os.path.realpath(__file__))
         npy2ply_script = os.path.join(script_dir, "npy2ply.py")
         
-        cmd_convert = [sys.executable, npy2ply_script, pointcloud_path]
-        print(f"Running conversion: {' '.join(cmd_convert)}")
-        try:
-            subprocess.check_call(cmd_convert)
-            ply_path = pointcloud_path[:-4] + '.ply'
-        except subprocess.CalledProcessError as e:
-            print(f"Error during npy2ply conversion: {e}")
-            return
+        ply_paths = []
+        for npy_path in [pointcloud_path, edge_cloud_path] if args.export_edge_cloud else [pointcloud_path]:
+            if npy_path is None:
+                continue
+            cmd_convert = [sys.executable, npy2ply_script, npy_path]
+            print(f"Running conversion: {' '.join(cmd_convert)}")
+            try:
+                subprocess.check_call(cmd_convert)
+                ply_paths.append(npy_path[:-4] + ".ply")
+            except subprocess.CalledProcessError as e:
+                print(f"Error during npy2ply conversion: {e}")
+                return
 
         if args.cleanup:
             cleanup_script = os.path.join(script_dir, "cleanup_pointcloud.py")
-            cmd_cleanup = [
-                sys.executable, cleanup_script,
-                "--input_file", ply_path,
-                "--algorithm", args.cleanup_algo
-            ]
-            
-            if args.cleanup_algo == 'sor':
-                cmd_cleanup.extend(["--nb_neighbors", str(args.sor_nb_neighbors)])
-                cmd_cleanup.extend(["--std_ratio", str(args.sor_std_ratio)])
-            elif args.cleanup_algo == 'ror':
-                cmd_cleanup.extend(["--radius", str(args.ror_radius)])
-                cmd_cleanup.extend(["--min_neighbors", str(args.ror_min_neighbors)])
-            
-            print(f"Running cleanup: {' '.join(cmd_cleanup)}")
-            try:
-                subprocess.check_call(cmd_cleanup)
-            except subprocess.CalledProcessError as e:
-                print(f"Error during cleanup: {e}")
+            for ply_path in ply_paths:
+                cmd_cleanup = [
+                    sys.executable,
+                    cleanup_script,
+                    "--input_file",
+                    ply_path,
+                    "--algorithm",
+                    args.cleanup_algo,
+                ]
+                if args.cleanup_algo == "sor":
+                    cmd_cleanup.extend(["--nb_neighbors", str(args.sor_nb_neighbors)])
+                    cmd_cleanup.extend(["--std_ratio", str(args.sor_std_ratio)])
+                elif args.cleanup_algo == "ror":
+                    cmd_cleanup.extend(["--radius", str(args.ror_radius)])
+                    cmd_cleanup.extend(["--min_neighbors", str(args.ror_min_neighbors)])
+
+                print(f"Running cleanup: {' '.join(cmd_cleanup)}")
+                try:
+                    subprocess.check_call(cmd_cleanup)
+                except subprocess.CalledProcessError as e:
+                    print(f"Error during cleanup: {e}")
 
 
 if __name__ == "__main__":

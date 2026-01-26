@@ -180,10 +180,25 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    indirs = []
-    for seq in os.listdir(args.indir):
-        if "0_calib" not in seq:
-            indirs.append(os.path.join(args.indir, seq))
+    if not os.path.isdir(args.indir):
+        raise FileNotFoundError(f"--indir does not exist or is not a directory: {args.indir}")
+
+    # Support both layouts:
+    # 1) Root folder with multiple sequences + 0_calib/ (e.g. datasets/)
+    # 2) A single sequence folder (e.g. datasets/board_slow/)
+    #
+    # We detect a "sequence folder" by the presence of a synced event .hdf5 file.
+    seq_event_h5 = glob.glob(os.path.join(args.indir, "*1.synced.*_event.hdf5"))
+    if seq_event_h5:
+        indirs = [args.indir]
+    else:
+        indirs = []
+        for seq in os.listdir(args.indir):
+            if "0_calib" in seq:
+                continue
+            seq_path = os.path.join(args.indir, seq)
+            if os.path.isdir(seq_path):
+                indirs.append(seq_path)
 
     cors = 1
     indirs_split = np.array_split(indirs, cors)

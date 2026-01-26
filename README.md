@@ -80,7 +80,7 @@ The code was tested on Ubuntu 22.04 and CUDA Toolkit 11.x. We use Anaconda to ma
 First, clone the repo
 ```bash
 git clone https://github.com/FiveTe/DEVO-point-cloud.git --recursive
-cd DEVO
+cd DEVO-point-cloud
 ```
 Then, create and activate the Anaconda environment
 ```bash

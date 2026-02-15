@@ -177,6 +177,71 @@ def main() -> None:
             action="store_true",
             help="Enable verbose output for cleanup (forwarded to cleanup_pointcloud.py --verbose / -v)",
       )
+      parser.add_argument(
+            "--export-emvs-mono",
+            action="store_true",
+            help="If set, create a monocular rpg_emvs input bag+conf from Vector events and DEVO poses.",
+      )
+      parser.add_argument(
+            "--emvs-bag-name",
+            default="emvs_input.bag",
+            help="Output bag name inside OUTDIR when --export-emvs-mono is enabled (default: emvs_input.bag).",
+      )
+      parser.add_argument(
+            "--emvs-conf-name",
+            default="emvs_mono.conf",
+            help="Output config name inside OUTDIR when --export-emvs-mono is enabled (default: emvs_mono.conf).",
+      )
+      parser.add_argument(
+            "--emvs-side",
+            default=None,
+            choices=["left", "right"],
+            help="Event side for EMVS conversion. Defaults to --export-side when omitted.",
+      )
+      parser.add_argument(
+            "--emvs-event-topic",
+            default="/dvs/events",
+            help="Event topic stored in EMVS bag (default: /dvs/events).",
+      )
+      parser.add_argument(
+            "--emvs-camera-info-topic",
+            default="/dvs/camera_info",
+            help="CameraInfo topic stored in EMVS bag (default: /dvs/camera_info).",
+      )
+      parser.add_argument(
+            "--emvs-pose-topic",
+            default="/pose",
+            help="Pose topic stored in EMVS bag (default: /pose).",
+      )
+      parser.add_argument(
+            "--emvs-min-depth",
+            type=float,
+            default=None,
+            help="Override EMVS min depth in meters. If omitted, estimated from frame seeds when possible.",
+      )
+      parser.add_argument(
+            "--emvs-max-depth",
+            type=float,
+            default=None,
+            help="Override EMVS max depth in meters. If omitted, estimated from frame seeds when possible.",
+      )
+      parser.add_argument(
+            "--emvs-dimZ",
+            type=int,
+            default=100,
+            help="EMVS depth plane count (default: 100).",
+      )
+      parser.add_argument(
+            "--emvs-t-margin-s",
+            type=float,
+            default=0.5,
+            help="Expand EMVS event window around DEVO pose timestamps by this margin in seconds (default: 0.5).",
+      )
+      parser.add_argument(
+            "--emvs-overwrite",
+            action="store_true",
+            help="Overwrite existing EMVS bag/conf outputs if they already exist.",
+      )
       args = parser.parse_args()
 
       indir = args.indir
@@ -275,6 +340,50 @@ def main() -> None:
             if args.verbose:
                   cleanup_cmd.append("--verbose")
             run(cleanup_cmd)
+
+            # 5) Optional: build single-bag monocular EMVS inputs.
+            if args.export_emvs_mono:
+                  emvs_side = args.emvs_side or args.export_side
+                  emvs_bag = os.path.join(outdir, args.emvs_bag_name)
+                  emvs_conf = os.path.join(outdir, args.emvs_conf_name)
+                  poses_npy = os.path.splitext(out_npy)[0] + "_poses.npy"
+                  tstamps_npy = os.path.splitext(out_npy)[0] + "_tstamps.npy"
+
+                  emvs_cmd = [
+                        py,
+                        "scripts/prepare_vector_emvs_mono.py",
+                        "--seq_dir",
+                        indir,
+                        "--devo_poses_npy",
+                        poses_npy,
+                        "--devo_tstamps_npy",
+                        tstamps_npy,
+                        "--out_bag",
+                        emvs_bag,
+                        "--out_conf",
+                        emvs_conf,
+                        "--side",
+                        emvs_side,
+                        "--event_topic",
+                        args.emvs_event_topic,
+                        "--camera_info_topic",
+                        args.emvs_camera_info_topic,
+                        "--pose_topic",
+                        args.emvs_pose_topic,
+                        "--dimZ",
+                        str(args.emvs_dimZ),
+                        "--t_margin_s",
+                        str(args.emvs_t_margin_s),
+                  ]
+                  if os.path.exists(frame_out):
+                        emvs_cmd += ["--frames_npz", frame_out]
+                  if args.emvs_min_depth is not None:
+                        emvs_cmd += ["--min_depth", str(args.emvs_min_depth)]
+                  if args.emvs_max_depth is not None:
+                        emvs_cmd += ["--max_depth", str(args.emvs_max_depth)]
+                  if args.emvs_overwrite:
+                        emvs_cmd.append("--overwrite")
+                  run(emvs_cmd)
 
             LOG.info("Pipeline finished. Results in %s", outdir)
 

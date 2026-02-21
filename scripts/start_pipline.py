@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 
@@ -51,6 +52,7 @@ def main() -> None:
       EPILOG = (
             "Examples:\n"
             "  python scripts/start_pipline.py --indir datasets/robot/\n"
+            "  python scripts/start_pipline.py --indir datasets/robot/ --cleanup-algorithm --export-emvs-mono --run-emvs\n"
             "  python scripts/start_pipline.py --indir datasets/robot/ --export-side right --cleanup-algorithm statistical\n"
             "  # pass custom config and weights\n"
             "  python scripts/start_pipline.py --indir datasets/robot/ --config config/eval_vector_gradient.yaml --weights \\n+DEVO.pth\n"
@@ -242,6 +244,11 @@ def main() -> None:
             action="store_true",
             help="Overwrite existing EMVS bag/conf outputs if they already exist.",
       )
+      parser.add_argument(
+            "--run-emvs",
+            action="store_true",
+            help="If set, run rpg_emvs after ensuring EMVS bag/conf exist (rosrun mapper_emvs run_emvs --flagfile=...).",
+      )
       args = parser.parse_args()
 
       indir = args.indir
@@ -255,6 +262,8 @@ def main() -> None:
       LOG.info("OUTDIR: %s", outdir)
 
       py = sys.executable
+      emvs_bag = os.path.join(outdir, args.emvs_bag_name)
+      emvs_conf = os.path.join(outdir, args.emvs_conf_name)
 
       try:
             # 1) Preprocess (skip if already done for this sequence)
@@ -344,8 +353,6 @@ def main() -> None:
             # 5) Optional: build single-bag monocular EMVS inputs.
             if args.export_emvs_mono:
                   emvs_side = args.emvs_side or args.export_side
-                  emvs_bag = os.path.join(outdir, args.emvs_bag_name)
-                  emvs_conf = os.path.join(outdir, args.emvs_conf_name)
                   poses_npy = os.path.splitext(out_npy)[0] + "_poses.npy"
                   tstamps_npy = os.path.splitext(out_npy)[0] + "_tstamps.npy"
 
@@ -385,7 +392,24 @@ def main() -> None:
                         emvs_cmd.append("--overwrite")
                   run(emvs_cmd)
 
+            # 6) Optional: run mapper_emvs when inputs are available.
+            if args.run_emvs:
+                  missing = [p for p in [emvs_bag, emvs_conf] if not os.path.exists(p)]
+                  if missing:
+                        raise FileNotFoundError(
+                              "Cannot run EMVS because required files are missing: "
+                              + ", ".join(missing)
+                              + ". Generate them first with --export-emvs-mono or provide matching names via "
+                              "--emvs-bag-name/--emvs-conf-name."
+                        )
+                  if shutil.which("rosrun") is None:
+                        raise FileNotFoundError(
+                              "Cannot run EMVS because 'rosrun' is not in PATH. Source your ROS environment first."
+                        )
+                  run(["rosrun", "mapper_emvs", "run_emvs", f"--flagfile={os.path.abspath(emvs_conf)}"])
+
             LOG.info("Pipeline finished. Results in %s", outdir)
+
 
       except subprocess.CalledProcessError as exc:
             LOG.error("Command failed: %s", exc)

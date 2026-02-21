@@ -75,6 +75,14 @@ Ground truth optical flow $\mathbf{f}$ for supervision is computed using poses a
 
 
 ## Setup
+### Docker (Preconfigured Environment)
+
+A ready-to-use Docker setup for this project is available here:
+
+Repository: https://github.com/Alireza-Safdari-Khosroshahi/DEVO-point-cloud-docker
+
+---
+
 The code was tested on Ubuntu 22.04 and CUDA Toolkit 11.x. We use Anaconda to manage our Python environment.
 
 First, clone the repo

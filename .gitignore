@@ -158,10 +158,19 @@ figures/*.pdf
 
 rsync*
 models/*
-datasets/TartanAir.pickle
-datasets/TartanAir
+datasets
+datasets/*
 TartanAirResults
 thirdparty/*
 movies/
 results/*
 TartanAirEVS.pickle
+__MACOSX/0_calib/._camera_mocap_extrinsic_results1.yaml
+__MACOSX/0_calib/._left_event_camera_intrinsic_results.yaml
+__MACOSX/0_calib/._left_regular_camera_intrinsic_results.yaml
+__MACOSX/0_calib/._rgbd_color_camera_factory_intrinsic_results.yaml
+__MACOSX/0_calib/._rgbd_depth_camera_factory_intrinsic_results.yaml
+__MACOSX/0_calib/._right_event_camera_intrinsic_results.yaml
+__MACOSX/0_calib/._right_regular_camera_intrinsic_results.yaml
+__MACOSX/0_calib/._small_scale_joint_camera_extrinsic_results.yaml
+

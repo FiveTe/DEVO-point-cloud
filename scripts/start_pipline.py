@@ -28,33 +28,34 @@ def _resolve_export_datapath(indir: str) -> str:
       return indir
 
 
-def run(cmd: list[str]) -> None:
-      LOG.info("Running: %s", " ".join(cmd))
-      # Stream combined stdout/stderr to terminal while capturing it for diagnostics
-      proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-      )
+def run(cmd: list[str], cwd=None) -> None:
+    LOG.info("Running: %s", " ".join(cmd))
 
-      output_lines: list[str] = []
-      if proc.stdout is not None:
-            for raw_line in proc.stdout:
-                  # print live to the user's terminal
-                  print(raw_line, end="")
-                  output_lines.append(raw_line)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        cwd=cwd,   # ← THIS is the missing piece
+    )
 
-      proc.wait()
-      output = "".join(output_lines)
-      if proc.returncode != 0:
-            LOG.error("Command failed: %s", " ".join(cmd))
-            LOG.error("Return code: %s", proc.returncode)
-            if output:
-                  LOG.error("Output:\n%s", output)
-            LOG.error("Working directory: %s", os.getcwd())
-            raise subprocess.CalledProcessError(proc.returncode, cmd, output=output)
+    output_lines: list[str] = []
+    if proc.stdout is not None:
+        for raw_line in proc.stdout:
+            print(raw_line, end="")
+            output_lines.append(raw_line)
+
+    proc.wait()
+    output = "".join(output_lines)
+
+    if proc.returncode != 0:
+        LOG.error("Command failed: %s", " ".join(cmd))
+        LOG.error("Return code: %s", proc.returncode)
+        if output:
+            LOG.error("Output:\n%s", output)
+        LOG.error("Working directory: %s", cwd if cwd else os.getcwd())
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=output)
 
 
 def main() -> None:
@@ -417,7 +418,7 @@ def main() -> None:
                         raise FileNotFoundError(
                               "Cannot run EMVS because 'rosrun' is not in PATH. Source your ROS environment first."
                         )
-                  run(["rosrun", "mapper_emvs", "run_emvs", f"--flagfile={os.path.abspath(emvs_conf)}"])
+                  run(["rosrun", "mapper_emvs", "run_emvs", f"--flagfile={os.path.abspath(emvs_conf)}"], cwd=outdir,)
 
             LOG.info("Pipeline finished. Results in %s", outdir)
 

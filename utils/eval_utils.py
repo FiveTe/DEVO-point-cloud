@@ -24,10 +24,19 @@ from devo.plot_utils import save_trajectory_tum_format
 from utils.viz_utils import show_image, visualize_voxel
 from utils.pcd_utils import PointCloudAccumulator
 
-from evo.tools import file_interface
-import evo.main_ape as main_ape
-from evo.core import sync, metrics
-from evo.core.trajectory import PoseTrajectory3D
+main_ape = None
+sync = None
+metrics = None
+PoseTrajectory3D = None
+_EVO_IMPORT_ERROR = None
+
+try:
+    import evo.main_ape as main_ape
+    from evo.core import sync, metrics
+    from evo.core.trajectory import PoseTrajectory3D
+except Exception as exc:
+    # Keep export/inference utilities usable even when evo's optional ROS deps mismatch.
+    _EVO_IMPORT_ERROR = exc
 
 # [DEBUG]
 # import matplotlib.pyplot as plt
@@ -508,7 +517,15 @@ def assert_eval_config(args):
     assert os.path.isfile(args.val_split)
     assert args.trials > 0
 
+
+def _require_evo():
+    if main_ape is None or sync is None or metrics is None or PoseTrajectory3D is None:
+        raise ImportError(
+            "evo imports failed. Install compatible evo/rosbags versions for evaluation features."
+        ) from _EVO_IMPORT_ERROR
+
 def ate(traj_ref, traj_est, timestamps):
+    _require_evo()
     import evo
     import evo.main_ape as main_ape
     from evo.core.trajectory import PoseTrajectory3D
@@ -643,6 +660,7 @@ def write_res_table(outfolder, res_str, scene_name, trial):
 
 
 def ate_real(traj_ref, tss_ref_us, traj_est, tstamps):
+    _require_evo()
     evoGT = PoseTrajectory3D(
         positions_xyz=traj_ref[:,:3],
         orientations_quat_wxyz=traj_ref[:,3:], # TODO wrong format: EVO uses wxyz, we use xyzw
@@ -664,6 +682,7 @@ def ate_real(traj_ref, tss_ref_us, traj_est, tstamps):
 
 
 def make_evo_traj(poses_N_x_7, tss_us):
+    _require_evo()
     assert poses_N_x_7.shape[1] == 7
     assert poses_N_x_7.shape[0] > 10
     assert tss_us.shape[0] == poses_N_x_7.shape[0]

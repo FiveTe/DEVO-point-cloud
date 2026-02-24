@@ -19,6 +19,15 @@ def _vector_preprocessed(seq_dir: str, side: str) -> bool:
       return all(os.path.exists(p) for p in required)
 
 
+def _resolve_export_datapath(indir: str) -> str:
+      """Support both <root>/<seq> and <root>/<seq>/<seq> layouts."""
+      seq_name = os.path.basename(os.path.normpath(indir))
+      nested_seq_dir = os.path.join(indir, seq_name)
+      if os.path.isdir(nested_seq_dir):
+            return nested_seq_dir
+      return indir
+
+
 def run(cmd: list[str]) -> None:
       LOG.info("Running: %s", " ".join(cmd))
       # Stream combined stdout/stderr to terminal while capturing it for diagnostics
@@ -251,7 +260,9 @@ def main() -> None:
       )
       args = parser.parse_args()
 
-      indir = args.indir
+      indir = os.path.abspath(os.path.normpath(args.indir))
+      if not os.path.isdir(indir):
+            raise FileNotFoundError(f"--indir does not exist or is not a directory: {indir}")
       foldername = os.path.basename(os.path.normpath(indir))
       outdir = os.path.join("results", foldername)
       os.makedirs(outdir, exist_ok=True)
@@ -275,8 +286,8 @@ def main() -> None:
             # 2) Export pointcloud (npy)
             out_npy = os.path.join(outdir, args.outname)
             frame_out = os.path.join(outdir, args.frame_out)
-            dataset_subfolder = os.path.basename(os.path.normpath(indir))
-            dataset_path = f"{indir}{dataset_subfolder}"
+            dataset_path = _resolve_export_datapath(indir)
+            LOG.info("Export datapath: %s", dataset_path)
             export_cmd = [
                   py,
                   "scripts/export_pointcloud.py",

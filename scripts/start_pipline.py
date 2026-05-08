@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+import numpy as np
+
 LOG = logging.getLogger("start_pipline")
 
 def _vector_preprocessed(seq_dir: str, side: str) -> bool:
@@ -26,6 +28,33 @@ def _resolve_export_datapath(indir: str) -> str:
       if os.path.isdir(nested_seq_dir):
             return nested_seq_dir
       return indir
+
+
+def _resolve_gt_pose_txt(indir: str, side: str, override: str | None) -> str:
+      if override:
+            gt_path = os.path.abspath(os.path.normpath(override))
+      else:
+            gt_path = os.path.join(indir, f"poses_evs_{side}.txt")
+      if not os.path.isfile(gt_path):
+            raise FileNotFoundError(
+                  f"GT pose file not found: {gt_path}. "
+                  f"Expected poses_evs_{side}.txt from pp_vector.py or pass --emvs-gt-pose-file."
+            )
+      return gt_path
+
+
+def _write_gt_pose_arrays(gt_pose_txt: str, outdir: str, side: str) -> tuple[str, str]:
+      data = np.loadtxt(gt_pose_txt, comments="#", ndmin=2)
+      if data.shape[1] != 8:
+            raise ValueError(
+                  f"Expected GT pose txt with 8 columns [timestamp tx ty tz qx qy qz qw], got {data.shape[1]} in {gt_pose_txt}"
+            )
+
+      poses_npy = os.path.join(outdir, f"emvs_gt_poses_{side}.npy")
+      tstamps_npy = os.path.join(outdir, f"emvs_gt_tstamps_{side}.npy")
+      np.save(poses_npy, data[:, 1:].astype(np.float32))
+      np.save(tstamps_npy, data[:, 0].astype(np.float64))
+      return poses_npy, tstamps_npy
 
 
 def run(cmd: list[str], cwd=None) -> None:
@@ -62,10 +91,11 @@ def main() -> None:
       EPILOG = (
             "Examples:\n"
             "  python scripts/start_pipline.py --indir datasets/robot/\n"
-            "  python scripts/start_pipline.py --indir datasets/robot/ --cleanup-algorithm --export-emvs-mono --run-emvs\n"
-            "  python scripts/start_pipline.py --indir datasets/robot/ --export-side right --cleanup-algorithm statistical\n"
+            "  python scripts/start_pipline.py --indir datasets/robot/ --export-emvs-mono --run-emvs\n"
+            "  python scripts/start_pipline.py --indir datasets/robot/ --export-emvs-mono --emvs-pose-source gt --run-emvs\n"
+            "  python scripts/start_pipline.py --indir datasets/robot/ --export-side right --cleanup-algorithm sor\n"
             "  # pass custom config and weights\n"
-            "  python scripts/start_pipline.py --indir datasets/robot/ --config config/eval_vector_gradient.yaml --weights \\n+DEVO.pth\n"
+            "  python scripts/start_pipline.py --indir datasets/robot/ --config config/eval_vector_gradient.yaml --weights DEVO.pth\n"
       )
 
       parser = argparse.ArgumentParser(
@@ -192,7 +222,22 @@ def main() -> None:
       parser.add_argument(
             "--export-emvs-mono",
             action="store_true",
-            help="If set, create a monocular rpg_emvs input bag+conf from Vector events and DEVO poses.",
+            help="If set, create a monocular rpg_emvs input bag+conf from Vector events and the selected pose source.",
+      )
+      parser.add_argument(
+            "--emvs-pose-source",
+            default="devo",
+            choices=["devo", "gt"],
+            help="Pose source for monocular EMVS export. Options: devo|gt (default: devo)",
+      )
+      parser.add_argument(
+            "--emvs-gt-pose-file",
+            default=None,
+            help=(
+                  "Optional GT pose txt for EMVS when --emvs-pose-source gt. "
+                  "Expected format: timestamp_us tx ty tz qx qy qz qw. "
+                  "Defaults to <indir>/poses_evs_<side>.txt."
+            ),
       )
       parser.add_argument(
             "--emvs-bag-name",
@@ -365,8 +410,14 @@ def main() -> None:
             # 5) Optional: build single-bag monocular EMVS inputs.
             if args.export_emvs_mono:
                   emvs_side = args.emvs_side or args.export_side
-                  poses_npy = os.path.splitext(out_npy)[0] + "_poses.npy"
-                  tstamps_npy = os.path.splitext(out_npy)[0] + "_tstamps.npy"
+                  if args.emvs_pose_source == "devo":
+                        poses_npy = os.path.splitext(out_npy)[0] + "_poses.npy"
+                        tstamps_npy = os.path.splitext(out_npy)[0] + "_tstamps.npy"
+                        LOG.info("Preparing monocular EMVS inputs with DEVO poses.")
+                  else:
+                        gt_pose_txt = _resolve_gt_pose_txt(indir, emvs_side, args.emvs_gt_pose_file)
+                        poses_npy, tstamps_npy = _write_gt_pose_arrays(gt_pose_txt, outdir, emvs_side)
+                        LOG.info("Preparing monocular EMVS inputs with GT poses from %s", gt_pose_txt)
 
                   emvs_cmd = [
                         py,
@@ -419,6 +470,8 @@ def main() -> None:
                               "Cannot run EMVS because 'rosrun' is not in PATH. Source your ROS environment first."
                         )
                   run(["rosrun", "mapper_emvs", "run_emvs", f"--flagfile={os.path.abspath(emvs_conf)}"], cwd=outdir,)
+                  LOG.info("Copying EMVS output bag to OUTDIR.")
+                  shutil.move("pointcloud.pcd", os.path.join(outdir, "pointcloud.pcd"))
 
             LOG.info("Pipeline finished. Results in %s", outdir)
 

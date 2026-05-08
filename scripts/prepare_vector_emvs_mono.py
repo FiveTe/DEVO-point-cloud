@@ -24,6 +24,32 @@ def _load_intrinsics(seq_dir: str, side: str) -> np.ndarray:
     return intr
 
 
+def _load_camera_calibration(seq_dir: str, side: str) -> dict[str, np.ndarray | str]:
+    yaml_path = os.path.join(seq_dir, "..", "0_calib", f"{side}_event_camera_intrinsic_results.yaml")
+    if os.path.isfile(yaml_path):
+        import yaml
+
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        return {
+            "distortion_model": str(data.get("camera_model", "plumb_bob")),
+            "D": np.asarray(data["distortion_coefficients"]["data"], dtype=np.float64).reshape(-1),
+            "K": np.asarray(data["camera_matrix"]["data"], dtype=np.float64).reshape(9),
+            "R": np.asarray(data["rectification_matrix"]["data"], dtype=np.float64).reshape(9),
+            "P": np.asarray(data["projection_matrix"]["data"], dtype=np.float64).reshape(12),
+        }
+
+    fx, fy, cx, cy = [float(x) for x in _load_intrinsics(seq_dir, side).reshape(4)]
+    return {
+        "distortion_model": "plumb_bob",
+        "D": np.asarray([0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64),
+        "K": np.asarray([fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0], dtype=np.float64),
+        "R": np.asarray([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float64),
+        "P": np.asarray([fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float64),
+    }
+
+
 def _estimate_depth_range_from_frames_npz(frames_npz: str) -> tuple[float, float]:
     data = np.load(frames_npz, allow_pickle=False)
     if "depths" not in data:
@@ -179,7 +205,7 @@ def main() -> None:
         os.remove(out_bag)
 
     h5_path = _load_vector_events_hdf5(args.seq_dir, args.side)
-    intr = _load_intrinsics(args.seq_dir, args.side)
+    camera_calib = _load_camera_calibration(args.seq_dir, args.side)
 
     poses_w2c = np.load(args.devo_poses_npy).astype(np.float32)
     tstamps_us = np.load(args.devo_tstamps_npy).astype(np.float64).reshape(-1)
@@ -228,16 +254,15 @@ def main() -> None:
         return Time(sec=int(ns // 1_000_000_000), nanosec=int(ns % 1_000_000_000))
 
     def make_camera_info(first_stamp_ns: int) -> CameraInfo:
-        fx, fy, cx, cy = [float(x) for x in intr.reshape(4)]
         return CameraInfo(
-            header=Header(seq=0, stamp=time_from_ns(first_stamp_ns), frame_id="camera"),
+            header=Header(seq=0, stamp=time_from_ns(first_stamp_ns), frame_id=f"{args.side}_event_camera"),
             height=int(args.H),
             width=int(args.W),
-            distortion_model="plumb_bob",
-            D=np.asarray([0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64),
-            K=np.asarray([fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0], dtype=np.float64),
-            R=np.asarray([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float64),
-            P=np.asarray([fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float64),
+            distortion_model=str(camera_calib["distortion_model"]),
+            D=np.asarray(camera_calib["D"], dtype=np.float64),
+            K=np.asarray(camera_calib["K"], dtype=np.float64),
+            R=np.asarray(camera_calib["R"], dtype=np.float64),
+            P=np.asarray(camera_calib["P"], dtype=np.float64),
             binning_x=0,
             binning_y=0,
             roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False),
@@ -296,7 +321,7 @@ def main() -> None:
         while i < n_events:
             j = min(i + int(args.max_events_per_msg), n_events)
             pkt_t_ns = int(event_t_ns[i])
-            header = Header(seq=0, stamp=time_from_ns(pkt_t_ns), frame_id="camera")
+            header = Header(seq=0, stamp=time_from_ns(pkt_t_ns), frame_id=f"{args.side}_event_camera")
             evs = []
             for k in range(i, j):
                 evs.append(

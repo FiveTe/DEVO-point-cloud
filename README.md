@@ -198,14 +198,22 @@ The qualitative and quantitative results will be written to `results/DATASETNAME
 If you find our work useful, please cite our paper:
 
 ```bib
+@article{safdari2026devo_point_cloud,
+  title   = {Extending Deep Event Visual Odometry with Sparse Point-Cloud Export},
+  author  = {Safdari, Alireza and Ashraf, Sajad},
+  journal = {arXiv preprint arXiv:2605.22890},
+  year    = {2026}
+}
+```
+Please also cite the original DEVO paper:
+```bib
 @inproceedings{klenk2023devo,
   title     = {Deep Event Visual Odometry},
   author    = {Klenk, Simon and Motzet, Marvin and Koestler, Lukas and Cremers, Daniel},
-  booktitle = {International Conference on 3D Vision, 3DV 2024, Davos, Switzerland,
-               March 18-21, 2024},
+  booktitle = {International Conference on 3D Vision, 3DV 2024, Davos, Switzerland, March 18-21, 2024},
   pages     = {739--749},
   publisher = {{IEEE}},
-  year      = {2024},
+  year      = {2024}
 }
 ```
 
@@ -220,4 +228,5 @@ We thank the authors of the following repositories for publicly releasing their 
 - [rpg_trajectory_evaluation](https://github.com/uzh-rpg/rpg_trajectory_evaluation)
 - [Event-based Vision for VO/VIO/SLAM in Robotics](https://github.com/arclab-hku/Event_based_VO-VIO-SLAM)
 
-This work was supported by the ERC Advanced Grant [SIMULACRON](https://cordis.europa.eu/project/id/884679).
+## License
+This repository follows the license terms of the original DEVO repository unless otherwise stated. Please refer to the original DEVO license and the licenses of all third party dependencies.

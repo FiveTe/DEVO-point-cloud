@@ -1,27 +1,15 @@
 <h1 align="center">DEVO Point Cloud</h1>
-
 <p align="center">
-
-  <strong>Extending Deep Event Visual Odometry with Sparse Point Cloud Export</strong>
-
+<strong>Extending Deep Event Visual Odometry with Sparse Point Cloud Export</strong>
 </p>
-
 <p align="center">
-
-  <a href="http://arxiv.org/abs/2605.22890"><strong>Our Paper arXiv</strong></a> |
-
-  <a href="https://github.com/FiveTe/DEVO-point-cloud"><strong>Code</strong></a> |
-
-  <a href="https://github.com/Alireza-Safdari-Khosroshahi/DEVO-point-cloud-docker"><strong>Docker Setup</strong></a> |
-
-  <a href="#citation"><strong>Citation</strong></a>
-
+<a href="http://arxiv.org/abs/2605.22890"><strong>Our Paper arXiv</strong></a> |
+<a href="https://github.com/FiveTe/DEVO-point-cloud"><strong>Code</strong></a> |
+<a href="https://github.com/Alireza-Safdari-Khosroshahi/DEVO-point-cloud-docker"><strong>Docker Setup</strong></a> |
+<a href="#citation"><strong>Citation</strong></a>
 </p>
-
 <p align="center">
-
   <strong>Authors:</strong> Alireza Safdari, Sajad Ashraf
-
 </p>
 
 ---
@@ -43,15 +31,10 @@ The original DEVO pipeline focuses primarily on accurate camera pose estimation 
 This repository adds:
 
 - sparse point cloud extraction from DEVO’s internal 3D representation
-
 - exportable point cloud and depth outputs from evaluation helper functions
-
 - a practical workflow for point cloud generation, conversion, and cleanup
-
 - documentation for using the exported data in visualization or downstream processing
-
 - a Docker based setup for easier reproducibility
-
 The goal is to preserve the original DEVO odometry behavior while making its sparse scene geometry available outside the optimization pipeline.
 
 ---
@@ -59,46 +42,32 @@ The goal is to preserve the original DEVO odometry behavior while making its spa
 ## Relation to the Original DEVO Work
 
 This project is **not a replacement for DEVO**. It is an extension of the original open source DEVO implementation.
-
 The original DEVO work provides:
-
 - monocular event only visual odometry
-
 - learned patch selection for event data
-
 - sparse patch based tracking
-
 - recurrent optical flow refinement
-
 - differentiable bundle adjustment
-
 - training and evaluation scripts for event based VO benchmarks
-
 Our extension adds:
-
 - access to DEVO’s internal sparse 3D estimates
-
 - point cloud export functionality
-
 - additional utilities for using the exported geometry
-
 - analysis of sparse point cloud quality against EMVS style reconstruction
-
 For full details of the original method, please refer to the DEVO paper and repository:
-
 - Original paper: [Deep Event Visual Odometry](https://arxiv.org/abs/2312.09800)
-
 - Original repository: [tum-vision/DEVO](https://github.com/tum-vision/DEVO)
-
 ---
 
 ## Abstract
-Event cameras offer the exciting possibility of tracking the camera's pose during high-speed motion and in adverse lighting conditions. Despite this promise, existing event-based monocular visual odometry (VO) approaches demonstrate limited performance on recent benchmarks. To address this limitation, some methods resort to additional sensors such as IMUs, stereo event cameras, or frame-based cameras. Nonetheless, these additional sensors limit the application of event cameras in real-world devices since they increase cost and complicate system requirements. Moreover, relying on a frame-based camera makes the system susceptible to motion blur and HDR. To remove the dependency on additional sensors and to push the limits of using only a single event camera, we present **Deep Event VO (DEVO), the first monocular event-only system with strong performance on a large number of real-world benchmarks**. DEVO sparsely tracks selected event patches over time. A key component of DEVO is a novel deep patch selection mechanism tailored to event data. We significantly decrease the pose tracking error on seven real-world benchmarks by up to 97% compared to event-only methods and often surpass or are close to stereo or inertial methods.
+Event cameras are well suited for visual odometry under high-speed motion and challenging lighting conditions due to their low latency, high temporal resolution, and high dynamic range. Deep Event Visual Odometry (DEVO) demonstrated that monocular event-only odometry can achieve strong performance by combining sparse patch tracking, learned patch selection, recurrent correspondence refinement, and differentiable bundle adjustment. In this project, we extend DEVO with a sparse point-cloud export pipeline. Rather than modifying the core odometry formulation, our approach exposes the internal 3D structure already estimated by DEVO and converts it into an explicit point-cloud representation for visualization and further processing. In addition, we implement a practical workflow for data export, format conversion, and point-cloud cleanup. The resulting system preserves the original visual odometry pipeline while enabling sparse geometric scene output. Experiments on the BOARD SLOW sequence show that the exported sparse cloud is locally consistent with EMVS reconstructions, achieving high precision at a 5 cm threshold, while also highlighting the expected limitations in density, completeness, and sensitivity to accumulated odometry noise.
 
 
 ## Overview
 <p align="center">
   <img width="90%" src="assets/devo.svg">
+  <img width="90%" src="assets/CloudProjection.png">
+  <img width="90%" src="assets/Comparison.png">
 </p>
 
 ## Point Cloud Export

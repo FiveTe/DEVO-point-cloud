@@ -2,6 +2,9 @@
 <p align="center">
 <strong>Extending Deep Event Visual Odometry with Sparse Point Cloud Export</strong>
 </p>
+<p>
+  <img width="90%" src="assets/pointCloud.png">
+</p>  
 <p align="center">
 <a href="http://arxiv.org/abs/2605.22890"><strong>Our Paper arXiv</strong></a> |
 <a href="https://github.com/FiveTe/DEVO-point-cloud"><strong>Code</strong></a> |

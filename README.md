@@ -1,40 +1,96 @@
-<h1 align="center">Deep Event Visual Odometry</h1>
+<h1 align="center">DEVO Point Cloud</h1>
+
 <p align="center">
-    <a href="https://vision.in.tum.de/members/klenk">Simon Klenk</a><sup>1,2*</sup> &emsp;&emsp;
-    <a href="https://motzet.github.io">Marvin Motzet</a><sup>1,2*</sup> &emsp;&emsp;
-    <a href="https://lukaskoestler.com">Lukas Koestler</a><sup>1,2</sup> &emsp;&emsp;
-    <a href="https://vision.in.tum.de/members/cremers">Daniel Cremers</a><sup>1,2</sup>
+
+  <strong>Extending Deep Event Visual Odometry with Sparse Point Cloud Export</strong>
+
 </p>
 
 <p align="center">
-    <sup>*</sup>equal contribution
+
+  <a href="http://arxiv.org/abs/2605.22890"><strong>Our Paper arXiv</strong></a> |
+
+  <a href="https://github.com/FiveTe/DEVO-point-cloud"><strong>Code</strong></a> |
+
+  <a href="https://github.com/Alireza-Safdari-Khosroshahi/DEVO-point-cloud-docker"><strong>Docker Setup</strong></a> |
+
+  <a href="#citation"><strong>Citation</strong></a>
+
 </p>
 
 <p align="center">
-    <sup>1</sup>Technical University of Munich (TUM) &emsp;&emsp;
-    <sup>2</sup>Munich Center for Machine Learning (MCML)
+
+  <strong>Authors:</strong> Alireza Safdari, Sajad Ashraf
+
 </p>
 
-<p align="center">
-    International Conference on 3D Vision (3DV) 2024, Davos, CH
-</p>
+---
 
+## About This Repository
 
-<p align="center">
-    <a href="https://www.youtube.com/watch?v=rP_OuOE-O34">
-        <img src="./assets/devo-youtube.png" alt="DEVO" width="600px"/>
-    </a>
-   <br>
-</p>
+This repository is an extension of the original **Deep Event Visual Odometry DEVO** framework by Simon Klenk, Marvin Motzet, Lukas Koestler, and Daniel Cremers.
 
+The original DEVO system introduced a monocular event only visual odometry pipeline that estimates camera motion from event camera data using sparse patch tracking, learned patch selection, recurrent correspondence refinement, and differentiable bundle adjustment. DEVO was published at **3DV 2024** and demonstrated strong performance across several real world event based visual odometry benchmarks.  [oai_citation:0‡arXiv](https://arxiv.org/abs/2312.09800?utm_source=chatgpt.com)
 
-<p align="center">
-    <a href="https://arxiv.org/abs/2312.09800"><strong>Paper (arXiv)</strong></a> |
-    <a href="https://www.youtube.com/watch?v=rP_OuOE-O34"><strong>Video</strong></a> |
-    <a href="https://drive.google.com/file/d/1-u_rW03HvtYhjPT6pm1JBhTTPWxGdVWP/view?usp=sharing"><strong>Poster</strong></a> |
-    <a href="#citation"><strong>BibTeX</strong></a>
-</p>
+Our work builds on DEVO and extends it with a **sparse point cloud export pipeline**. Instead of changing the core visual odometry formulation, this project exposes the internal sparse 3D structure already estimated by DEVO and converts it into an explicit point cloud representation for visualization, analysis, and downstream processing. This extension is described in our arXiv paper **Extending Deep Event Visual Odometry with Sparse Point Cloud Export**.  [oai_citation:1‡arXiv](https://arxiv.org/abs/2605.22890?utm_source=chatgpt.com)
 
+---
+
+## Main Contribution
+
+The original DEVO pipeline focuses primarily on accurate camera pose estimation from monocular event data. Our contribution adds access to the sparse geometric reconstruction that is already maintained internally during odometry estimation.
+
+This repository adds:
+
+- sparse point cloud extraction from DEVO’s internal 3D representation
+
+- exportable point cloud and depth outputs from evaluation helper functions
+
+- a practical workflow for point cloud generation, conversion, and cleanup
+
+- documentation for using the exported data in visualization or downstream processing
+
+- a Docker based setup for easier reproducibility
+
+The goal is to preserve the original DEVO odometry behavior while making its sparse scene geometry available outside the optimization pipeline.
+
+---
+
+## Relation to the Original DEVO Work
+
+This project is **not a replacement for DEVO**. It is an extension of the original open source DEVO implementation.
+
+The original DEVO work provides:
+
+- monocular event only visual odometry
+
+- learned patch selection for event data
+
+- sparse patch based tracking
+
+- recurrent optical flow refinement
+
+- differentiable bundle adjustment
+
+- training and evaluation scripts for event based VO benchmarks
+
+Our extension adds:
+
+- access to DEVO’s internal sparse 3D estimates
+
+- point cloud export functionality
+
+- additional utilities for using the exported geometry
+
+- analysis of sparse point cloud quality against EMVS style reconstruction
+
+For full details of the original method, please refer to the DEVO paper and repository:
+
+- Original paper: [Deep Event Visual Odometry](https://arxiv.org/abs/2312.09800)
+
+- Original repository: [tum-vision/DEVO](https://github.com/tum-vision/DEVO)
+
+---
 
 ## Abstract
 Event cameras offer the exciting possibility of tracking the camera's pose during high-speed motion and in adverse lighting conditions. Despite this promise, existing event-based monocular visual odometry (VO) approaches demonstrate limited performance on recent benchmarks. To address this limitation, some methods resort to additional sensors such as IMUs, stereo event cameras, or frame-based cameras. Nonetheless, these additional sensors limit the application of event cameras in real-world devices since they increase cost and complicate system requirements. Moreover, relying on a frame-based camera makes the system susceptible to motion blur and HDR. To remove the dependency on additional sensors and to push the limits of using only a single event camera, we present **Deep Event VO (DEVO), the first monocular event-only system with strong performance on a large number of real-world benchmarks**. DEVO sparsely tracks selected event patches over time. A key component of DEVO is a novel deep patch selection mechanism tailored to event data. We significantly decrease the pose tracking error on seven real-world benchmarks by up to 97% compared to event-only methods and often surpass or are close to stereo or inertial methods.
